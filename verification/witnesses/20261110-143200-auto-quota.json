@@ -1,0 +1,30 @@
+{
+  "objective": "Hourly intelligence-ranked infered/auto under a strict $1/M output-rate ceiling and Codex credit-exhaustion fallback",
+  "timestamp": "2026-11-10T14:32:00+03:00",
+  "repository": "/Users/moe/Desktop/infered",
+  "branch": "main",
+  "commits": ["8d08b87", "109f745"],
+  "issue": "https://github.com/moneyacademyKE/infered/issues/2",
+  "bankai": "bk-a141",
+  "deployment_version": "f0849c2c-ed4e-4024-8b6b-1b5d53546a65",
+  "files_changed": ["src/router/auto.js", "src/router/catalog.js", "src/router/client.js", "src/router/pareto.js", "src/router/quota.js", "src/router/stream.js", "src/worker.js", "migrations/0002_auto_chain.sql", "test/auto_test.clj", "test/auto_worker_test.clj", "test/quota_test.clj", "test/quota_worker_test.clj", "test/run_tests.clj", "test/worker_test.clj", "wrangler.jsonc"],
+  "commands_run": [
+    {"command": "bb test-all", "exit_code": 0, "result": "19 test namespaces; zero failures and errors"},
+    {"command": "bb lint", "exit_code": 0, "result": "all files under 500 lines"},
+    {"command": "git diff --check", "exit_code": 0, "result": "no whitespace errors"},
+    {"command": "wrangler d1 execute infered-routing --remote --file migrations/0002_auto_chain.sql", "exit_code": 0, "result": "schema applied"},
+    {"command": "wrangler deploy", "exit_code": 0, "result": "hourly trigger deployed"},
+    {"command": "bb scripts/smoke.bb", "exit_code": 0, "result": "eight live checks passed"},
+    {"command": "opencrabs doctor", "exit_code": 0, "result": "9 checks; 0 warnings"}
+  ],
+  "results": {
+    "auto_endpoint": "HTTP 200; six eligible models in snapshot",
+    "model_listing": "HTTP 200; seven chains including infered/auto",
+    "nonstream_live": "HTTP 200; Astra returned OK",
+    "stream_live": "HTTP 200; Astra returned OK and one DONE; budget tier 0.999999",
+    "lower_cap_live": "HTTP 400 when no model qualified under stricter requested cap",
+    "quota_fallback": "Worker integration test passed with simulated split SSE quota text; naturally occurring live failure not observed"
+  },
+  "residual_risks": ["First scheduled cron execution not observed", "Live credit exhaustion event not observed", "Benchmark scores are a dated snapshot", "Output rate cap does not bound input or total cost", "Existing streamed answer cannot be replaced after real content is delivered", "Cloudflare Free CPU load of cron not soak tested"],
+  "verdict": "PARTIAL"
+}
