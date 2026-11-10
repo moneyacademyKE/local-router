@@ -7,6 +7,7 @@
 import { recordSample, recordUsage } from "./metrics.js";
 import { getOfficialPrice, CHAIN_FALLBACKS } from "./catalog.js";
 import { executeStreamingWithSplice, DEFAULT_FIRST_BYTE_TIMEOUT_MS, DEFAULT_PRE_COMMIT_BUDGET_MS, NON_RETRYABLE_OPEN_STATUSES } from "./stream.js";
+import { isCodexCreditRefusal } from "./quota.js";
 
 const DEFAULT_TIMEOUT_MS = 25000;
 
@@ -71,6 +72,7 @@ async function executeCandidateRequest({
 
     if (!response.ok) {
       const errText = await response.text().catch(() => "Unknown error");
+      detachClientAbort();
       return {
         success: false,
         status: response.status,
@@ -80,6 +82,10 @@ async function executeCandidateRequest({
     }
 
     const json = await response.json();
+    if ((json.choices || []).some(c => isCodexCreditRefusal(c?.message?.content))) {
+      detachClientAbort();
+      return { success: false, status: 403, error: "codex_credit_balance_exhausted", latencyMs: Date.now() - startTime };
+    }
     detachClientAbort();
     const totalMs = Date.now() - startTime;
     return {

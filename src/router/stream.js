@@ -31,6 +31,7 @@
 import { recordSample, recordUsage } from "./metrics.js";
 import { getOfficialPrice } from "./catalog.js";
 import { takeCompleteSseFrames, windowHasCompletionToken, jsonCompletionToSseStream } from "./sse.js";
+import { createQuotaFrameGate } from "./quota.js";
 
 const DEFAULT_TIMEOUT_MS = 25000;
 export const DEFAULT_FIRST_BYTE_TIMEOUT_MS = 15000;
@@ -324,6 +325,7 @@ export function executeStreamingWithSplice({
         heldErrorChunk = null;
         let candidateDied = false;
         let emptyDone = false;
+        const quotaGate = createQuotaFrameGate();
         // Per-candidate parser state: a partial SSE event or pending UTF-8
         // bytes from a DEAD candidate must never leak into the next one.
         pending = "";
@@ -338,25 +340,31 @@ export function executeStreamingWithSplice({
           if (pending.length > MAX_SSE_EVENT_CHARS) return "dead";
           const split = takeCompleteSseFrames(pending);
           pending = split.rest;
-          for (const frame of split.frames) {
-            if (!contentSeen && windowHasCompletionToken(frame)) contentSeen = true;
-            const errorFrame = frame.includes(ERROR_NEEDLE);
-            if (errorFrame && !contentSeen) {
-              heldErrorChunk = encoder.encode(frame);
-              return "dead";
-            }
-            if (frame.includes("[DONE]")) {
-              // A [DONE] with zero actionable completion is a corpse: withhold
-              // it and let the next candidate answer. Tool calls count.
-              if (!contentSeen) {
-                emptyDone = true;
+          for (const sourceFrame of split.frames) {
+            const gated = contentSeen ? { frames: [sourceFrame] } : quotaGate.accept(sourceFrame);
+            if (gated.quota) { refusedModels.add(candidate.modelId); return "dead"; }
+            for (const frame of gated.frames) {
+              if (!contentSeen && windowHasCompletionToken(frame)) contentSeen = true;
+              const errorFrame = frame.includes(ERROR_NEEDLE);
+              if (errorFrame && !contentSeen) {
+                heldErrorChunk = encoder.encode(frame);
                 return "dead";
               }
-              doneSeen = true;
+              if (frame.includes("[DONE]")) {
+                // A [DONE] with zero actionable completion is a corpse.
+                if (!contentSeen) { emptyDone = true; return "dead"; }
+                doneSeen = true;
+              }
+              await writeChunk(encoder.encode(frame));
+              if (errorFrame) return "poisoned";
+              if (doneSeen) return "finished";
             }
-            await writeChunk(encoder.encode(frame));
-            if (errorFrame) return "poisoned";
-            if (doneSeen) return "finished";
+          }
+          if (final) {
+            for (const frame of quotaGate.finish()) {
+              if (windowHasCompletionToken(frame)) contentSeen = true;
+              await writeChunk(encoder.encode(frame));
+            }
           }
           return "continue";
         };
