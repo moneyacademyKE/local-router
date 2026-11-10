@@ -3,6 +3,8 @@
  * Pure data structures and resolution logic for Infered router.
  */
 
+import { AUTO_MODELS } from "./auto.js";
+
 // Model capabilities and quality benchmarks (normalized 0.0 - 1.0).
 // Slimmed 2026-09-05 (owner directive): chain members plus owner-designated
 // raw models are catalogued — the router sells the cascade chains, not a
@@ -106,7 +108,9 @@ export const CASCADE_CHAINS = {
   "infered/astra-terra": ASTRA_TERRA_CHAIN,
   "infered/terra-kimi": TERRA_KIMI_CHAIN,
   "infered/kimi-glm": KIMI_GLM_CHAIN,
-  "infered/solterra": SOLTERRA_CHAIN
+  "infered/solterra": SOLTERRA_CHAIN,
+  // Static universe only; actual members come from the hourly market snapshot.
+  "infered/auto": AUTO_MODELS.map(m => m.id)
 };
 
 // Default requested model — also where UNRECOGNIZED names land (typos like

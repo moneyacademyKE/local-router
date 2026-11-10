@@ -101,9 +101,10 @@ export async function openUpstreamStream({
   };
 
   const headers = { "Content-Type": "application/json", "Accept": "text/event-stream" };
-  if (candidate.providerId && candidate.providerId !== "official") {
+  if (candidate.providerId && candidate.providerId !== "official" && candidate.providerId !== "inferhub-auto") {
     headers["X-InferHub-Provider"] = candidate.providerId;
   }
+  if (Number.isFinite(candidate.maxOutputPrice)) headers["x-max-output-price"] = String(candidate.maxOutputPrice);
   if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
 
   try {

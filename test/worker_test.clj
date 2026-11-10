@@ -65,7 +65,8 @@
                   hasTerraKimi: modelsJson.data.some(m => m.id === 'infered/terra-kimi'),
                   hasKimiGlm: modelsJson.data.some(m => m.id === 'infered/kimi-glm'),
                   hasSolterra: modelsJson.data.some(m => m.id === 'infered/solterra'),
-                  onlySixChains: modelsJson.data.every(m => ['infered/glm-budget', 'infered/astra-budget', 'infered/astra-terra', 'infered/terra-kimi', 'infered/kimi-glm', 'infered/solterra'].includes(m.id)),
+                  hasAuto: modelsJson.data.some(m => m.id === 'infered/auto'),
+                  onlySixChains: modelsJson.data.every(m => ['infered/glm-budget', 'infered/astra-budget', 'infered/astra-terra', 'infered/terra-kimi', 'infered/kimi-glm', 'infered/solterra', 'infered/auto'].includes(m.id)),
                   metricsQuotesCount: metricsJson.quotes.length,
                   chatSuccess: chatRes.status === 200,
                   selectedModel: selectedModel,
@@ -73,13 +74,14 @@
                   chatContent: chatJson.choices[0].message.content.length > 0
                 }));")]
       (is (= "healthy" (:healthStatus res)))
-      (is (= 6 (:modelsCount res)) "exactly the six chain products are listed")
+      (is (= 7 (:modelsCount res)) "all seven chain products are listed")
       (is (:hasGlmBudget res))
       (is (:hasAstraBudget res))
       (is (:hasAstraTerra res))
       (is (:hasTerraKimi res))
       (is (:hasKimiGlm res))
       (is (:hasSolterra res))
+      (is (:hasAuto res))
       (is (:onlySixChains res) "no policy aliases, no raw models in the listing")
       (is (> (:metricsQuotesCount res) 0))
       (is (:chatSuccess res))
@@ -359,4 +361,3 @@
       (is (= "ali/glm-5.3" (:bogusSelected res))
           "unknown tier values are ignored, never an error")
       (is (= 200 (:strongStatus res))))))
-

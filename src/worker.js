@@ -10,6 +10,7 @@ import { executeWithFallback, executeWithChainFallback } from "./router/client.j
 import { collectAnalytics, renderAnalyticsPage } from "./ui/analytics.js";
 import { corsHeaders, jsonResponse, buildTelemetryHeaders, recordRoutingAnalytics, createStandaloneMockFetch } from "./router/telemetry.js";
 import { checkBodySize, validateChatBody, MAX_BODY_BYTES } from "./router/validate.js";
+import { AUTO_MODEL, getAutoSnapshot } from "./router/auto.js";
 
 const MAX_BODY_BYTES_STRING = MAX_BODY_BYTES;
 
@@ -102,6 +103,9 @@ function triggerBackgroundSwrSyncIfNeeded(priceCache, baseUrl, apiKey, ctx) {
 }
 
 export default {
+  async scheduled(_controller, env) {
+    await getAutoSnapshot(env);
+  },
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname;
@@ -170,6 +174,11 @@ export default {
         activeSessions: cacheStore.sessionAffinity.size,
         usage: getUsageSummary(metricsStore)
       });
+    }
+
+    if (path === "/v1/auto" && request.method === "GET") {
+      try { return jsonResponse(await getAutoSnapshot(env)); }
+      catch { return jsonResponse({ error: "Auto market snapshot unavailable" }, 503); }
     }
 
     if (path === "/v1/models" && request.method === "GET") {
@@ -256,6 +265,11 @@ export default {
         // Sol removed 2026-09-05 (owner directive) — glm-budget is the default chain.
         const requestedModel = requestBody.model || "infered/glm-budget";
         const { weights, maxFallbackPrice } = parseWeightsAndBudget(request, requestBody, env, url);
+        let autoSnapshot = null;
+        if (requestedModel === AUTO_MODEL) {
+          try { autoSnapshot = await getAutoSnapshot(env); }
+          catch { return jsonResponse({ error: { message: "Auto market snapshot unavailable; no safe route.", type: "provider_error" } }, 503); }
+        }
         const startAtModel = request.headers.get("X-Infered-Tier") === "strong" ? resolveStrongLink(requestedModel) : null;
 
         // 1. Session identity: explicit header wins, else a conversation-head
@@ -265,7 +279,7 @@ export default {
         const sessionAffinity = await getSessionPin(cacheStore, sessionId, env);
 
         // 2. Exact Deterministic Response Caching check
-        const isDeterministic = (requestBody.temperature === 0 || request.headers.get("X-Infered-Cache") === "true") && !requestBody.stream;
+        const isDeterministic = requestedModel !== AUTO_MODEL && (requestBody.temperature === 0 || request.headers.get("X-Infered-Cache") === "true") && !requestBody.stream;
         const cacheKey = isDeterministic ? computeRequestKey(requestBody) : null;
 
         if (isDeterministic && cacheKey) {
@@ -308,7 +322,8 @@ export default {
           maxFallbackPrice,
           sessionAffinityProvider: sessionAffinity?.providerId,
           sessionAffinityModel: sessionAffinity?.modelId,
-          startAtModel
+          startAtModel,
+          autoSnapshot
         });
         const execute = (cands) => executeWithFallback({
             candidates: cands,

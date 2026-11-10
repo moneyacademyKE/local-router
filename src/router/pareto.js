@@ -7,6 +7,7 @@
 import { resolveVirtualModel, getModelMetadata, CASCADE_CHAINS, CEILING_EXEMPT_MODELS } from "./catalog.js";
 import { getQuotesForModel, calculateSavingsPct } from "./pricing.js";
 import { getProviderStats, isCircuitOpen } from "./metrics.js";
+import { AUTO_MODEL, AUTO_OUTPUT_BID } from "./auto.js";
 
 export const DEFAULT_WEIGHTS = {
   price: 0.5,
@@ -220,8 +221,27 @@ export function rankCandidates({
   maxFallbackPrice = null,
   sessionAffinityProvider = null,
   sessionAffinityModel = null,
-  startAtModel = null
+  startAtModel = null,
+  autoSnapshot = null
 }) {
+  if (model === AUTO_MODEL) {
+    const bid = maxFallbackPrice === null ? AUTO_OUTPUT_BID : Math.min(AUTO_OUTPUT_BID, maxFallbackPrice);
+    if (!Number.isFinite(bid) || bid < 0) return [];
+    return (autoSnapshot?.models || []).filter(m =>
+      Number.isFinite(m.completion) && m.completion >= 0 && m.completion <= bid
+    ).map((m, i) => {
+      const providerId = "inferhub-auto";
+      const meta = getModelMetadata(m.modelId);
+      const quote = { providerId, modelId: m.modelId, prompt: m.prompt,
+        completion: m.completion, blendedPrice: m.prompt * 0.25 + m.completion * 0.75, priceSource: "spot" };
+      const stats = getProviderStats(metricsStore, providerId, m.modelId);
+      return { providerId, modelId: m.modelId, quote, family: meta.family, tier: meta.tier,
+        quality: meta.quality, blendedPrice: quote.blendedPrice, outputTokenPrice: m.completion,
+        savingsPct: calculateSavingsPct(m.modelId, quote), isPrimary: i === 0, chainIndex: i,
+        escalationLevel: 0, budgetTier: bid, maxOutputPrice: bid,
+        circuitTripped: isCircuitOpen(metricsStore, providerId, m.modelId), ...stats };
+    }).sort((a, b) => Number(a.circuitTripped) - Number(b.circuitTripped) || a.chainIndex - b.chainIndex);
+  }
   const isCascadeRequest = Boolean(CASCADE_CHAINS[model]) ||
                            maxFallbackPrice !== null;
 
