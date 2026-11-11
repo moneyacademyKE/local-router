@@ -15,8 +15,10 @@
               const feed = {data: [
                 model('cx/gpt-6-astra', [1.01, 1.02]),
                 model('oai/gpt-6.1-sol', [0.9, 0.95]),
+                model('ag/claude-sonnet-4-6', [0.3, 0.35]),
                 model('cx/gpt-6.1-terra', [0.1, 0.12, 0.15]),
                 model('ali/kimi-k3.1-pro', [0.95, 0.96]),
+                model('grok/grok-4.7', [0.01, 0.02, 0.03]),
                 model('ali/qwen3.8-max-0902', [0.006, 0.018, 0.042]),
                 model('ali/glm-5.3', [0.035, 0.08, 0.09]),
                 model('zai/glm-5.3', [0.004, 0.25]),
@@ -26,10 +28,10 @@
               console.log(JSON.stringify(snapshot));")]
     (is (= 2 (:hour res)))
     (is (= 10800000 (:nextRefreshAt res)))
-    (is (= ["oai/gpt-6.1-sol" "cx/gpt-6.1-terra" "ali/kimi-k3.1-pro"
-            "ali/qwen3.8-max-0902" "ali/glm-5.3" "zai/glm-5.3"]
+    (is (= ["oai/gpt-6.1-sol" "cx/gpt-6.1-terra" "ag/claude-sonnet-4-6" "ali/kimi-k3.1-pro"
+            "grok/grok-4.7" "ali/qwen3.8-max-0902" "ali/glm-5.3" "zai/glm-5.3"]
            (mapv :modelId (:models res)))
-        "equal scores order by in-cap seller depth before price: ali/glm (3 in-cap sellers) outranks zai/glm (2) despite zai's cheaper head ask")
+        "equal scores order by in-cap seller depth before price: terra (3 in-cap) outranks sonnet (2) at 51; ali/glm (3 in-cap sellers) outranks zai/glm (2) despite zai's cheaper head ask")
     (is (every? #(< (:completion %) 1) (:models res)))
     (is (= {:askCount 3 :inCapDepth 3 :depthPrice 0.042}
            (select-keys (first (filter #(= "ali/qwen3.8-max-0902" (:modelId %)) (:models res)))

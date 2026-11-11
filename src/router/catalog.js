@@ -18,7 +18,12 @@ export const MODEL_TIERS = {
   "oai/gpt-6.1-terra": { tier: "balanced-frontier", quality: 0.91, family: "openai", context: 1050000 },
   "zai/glm-5.3": { tier: "agentic-coding", quality: 0.93, family: "z.ai", context: 1000000 },
   "ali/kimi-k3.1-pro": { tier: "moe-frontier", quality: 0.94, family: "moonshot", context: 1000000 },
-  "ali/qwen3.8-max-0902": { tier: "frontier-flagship", quality: 0.96, family: "qwen", context: 1000000 }
+  "ali/qwen3.8-max-0902": { tier: "frontier-flagship", quality: 0.96, family: "qwen", context: 1000000 },
+  // Market-gap wiring 2026-11-11 (owner directive; argon excluded): grok-4.7
+  // (AA 35.5, 8 in-cap sellers at $0.006/M out, 500K ctx) and the
+  // toggle-flipped claude-sonnet-4-6 (AA 51, 7 in-cap sellers at $0.285/M out, 1M ctx).
+  "grok/grok-4.7": { tier: "balanced-frontier", quality: 0.93, family: "xai", context: 500000 },
+  "ag/claude-sonnet-4-6": { tier: "agentic-coding", quality: 0.94, family: "anthropic", context: 1000000 }
 };
 
 // Official provider list prices in USD per 1M tokens [Prompt, Completion]
@@ -38,16 +43,23 @@ export const OFFICIAL_PRICES = {
   "zai/glm-5.3": { prompt: 1.40, completion: 4.40 },
   // Refreshed 2026-11-09 (owner directive): flash/terra-5.6/kimi-k3 excised;
   // 6.1-terra + kimi-k3.1-pro list prices verified against the live feed.
-  "ali/kimi-k3.1-pro": { prompt: 2, completion: 10 }
+  "ali/kimi-k3.1-pro": { prompt: 2, completion: 10 },
+  // Market-gap wiring 2026-11-11 (owner directive; argon excluded). List
+  // prices per the live feed (official_in/out, verified this turn).
+  "grok/grok-4.7": { prompt: 2, completion: 6 },
+  "ag/claude-sonnet-4-6": { prompt: 3, completion: 15 }
 };
 
 // Budget cascade ordering (sol removed 2026-09-05; flash/terra-5.6/kimi-k3
 // excised 2026-11-09 — owner directives). ali/glm-5.3 leads (min spot ask
 // $0.0352/M output, under the $0.50 tier-0 ceiling); qwen-0902 is every
-// chain's tail (owner directive 2026-11-09).
+// chain's tail (owner directive 2026-11-09). grok-4.7 wired 2026-11-11
+// (owner directive, market-gap pick): $0.006/M output across 8 in-cap
+// sellers — the chain's cheapest enabled member; price ranking does the rest.
 export const GLM_BUDGET_FALLBACK_CHAIN = [
   "ali/glm-5.3",
   "zai/glm-5.3",
+  "grok/grok-4.7",
   "ali/kimi-k3.1-pro",
   "cx/gpt-6.1-terra",
   "ali/qwen3.8-max-0902"

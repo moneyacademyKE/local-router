@@ -19,9 +19,9 @@
                 const priceCache = createPriceCache();
                 const metricsStore = createMetricsStore();
 
-                // glm-budget head is ali/glm-5.3 (seeded min ask $0.132 out,
-                // calibrated to the 2026-09-23 feed). Default tier-0 ceiling
-                // = 0.50 -> head serves (sol-budget reroutes to glm-budget)
+                // glm-budget is an ordered cascade: head ali/glm-5.3 (seeded
+                // $0.132) is eligible at the 0.50 tier-0 ceiling, so the
+                // head serves (sol-budget reroutes to glm-budget)
                 const candDefault = rankCandidates({
                   model: 'infered/sol-budget',
                   priceCache,
@@ -29,8 +29,8 @@
                   maxFallbackPrice: 0.50
                 });
 
-                // User tightens threshold to 0.10 -> head's $0.132 > $0.10 and every
-                // mid link is pricier -> only the qwen tail ($0.03) qualifies
+                // User tightens threshold to 0.10 -> the glm pair (0.132/0.176)
+                // is priced out; grok-4.7 (wired 2026-11-11, $0.006) is first eligible
                 const candTight = rankCandidates({
                   model: 'infered/sol-budget',
                   priceCache,
@@ -60,11 +60,14 @@
                   afterSpikeModel: candAfterSpike[0]?.modelId,
                   afterSpikePrice: candAfterSpike[0]?.outputTokenPrice
                 }));")]
-      ;; sol removed from chains and ali/glm-5.3 leads glm-budget (2026-09-15):
-      ;; the sol fixture asks are invisible to sol-budget, so the head wins at
-      ;; the tier-0 ceiling; only a 0.10 ceiling drops below its $0.132 ask.
+      ;; glm-budget is an ordered cascade (head = preferred): ali/glm-5.3
+      ;; ($0.132 seeded) is eligible at the 0.50 tier-0 ceiling, so the head
+      ;; serves. grok-4.7 (wired 2026-11-11, $0.006, position 3) takes over
+      ;; the moment the glm pair is priced out — the 0.10 tight ceiling
+      ;; proves exactly that. The sol fixture asks stay invisible (excised)
+      ;; through the price spike.
       (is (= "ali/glm-5.3" (:defaultModel res)))
-      (is (= "ali/qwen3.8-max-0902" (:tightModel res))
-          "0.10 ceiling skips glm/zai/kimi asks; the qwen tail ($0.03) carries it")
+      (is (= "grok/grok-4.7" (:tightModel res))
+          "0.10 ceiling prices out the glm pair; grok ($0.006) is the first eligible member")
       (is (= "ali/glm-5.3" (:afterSpikeModel res)))
       (is (<= (:afterSpikePrice res) 0.50)))))

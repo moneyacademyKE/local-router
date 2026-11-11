@@ -10,12 +10,18 @@ export const AUTO_HOUR_MS = 60 * 60 * 1000;
 // Scores are the Artificial Analysis snapshot from 2026-11-10, not live scores.
 // Equal-score listings are ordered by in-cap seller depth (availability), then
 // sustained in-cap price — never by a single seller's cheapest ask.
+// 2026-11-11 (owner directive, market-gap wiring): grok-4.7 (35.5, 8 in-cap
+// sellers) and claude-sonnet-4-6 (51, 7 in-cap sellers, account toggle
+// flipped) join the pool. ag/gemini-4-argon stays OUT — explicit owner
+// exclusion despite market eligibility.
 export const AUTO_MODELS = [
   { id: "cx/gpt-6-astra", score: 57 },
   { id: "oai/gpt-6.1-sol", score: 55 },
   { id: "cx/gpt-6.1-terra", score: 51 },
   { id: "oai/gpt-6.1-terra", score: 51 },
+  { id: "ag/claude-sonnet-4-6", score: 51 },
   { id: "ali/kimi-k3.1-pro", score: 46 },
+  { id: "grok/grok-4.7", score: 35.5 },
   { id: "ali/qwen3.8-max-0902", score: 34 },
   { id: "ali/glm-5.3", score: 32 },
   { id: "zai/glm-5.3", score: 32 }
