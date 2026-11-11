@@ -95,11 +95,14 @@ local D1, no Cloudflare dependency for the primary door.
 
 - Service: `dev.moneyacad.infered` (port **8790**; 8787 is the Bankai daemon) —
   KeepAlive, auto-restarts, starts at login.
-- Hourly `auto` refresh: `dev.moneyacad.infered.auto` curls
-  `/__scheduled?cron=0%20*%20*%20*` (requires `--test-scheduled`, enabled).
-  Fires at minute 2 of every hour (`StartCalendarInterval` + `RunAtLoad`;
+- `auto` heartbeat: `dev.moneyacad.infered.auto` curls
+  `/__scheduled?cron=0%2C30%20*%20*%20*` (requires `--test-scheduled`, enabled).
+  Fires at minutes **2 and 32** of every hour — a 30-minute heartbeat for
+  measured seller-quota health (owner directive 2026-11-11); the market snapshot
+  itself stays hourly (a two-entry `StartCalendarInterval` array + `RunAtLoad`;
   `StartInterval` never fired under bootstrap and was retired 2026-11-11).
-  Log: `~/.opencrabs/state/infered-local/auto-refresh.log`.
+  Log: `~/.opencrabs/state/infered-local/auto-refresh.log` (curl 28s timeouts
+  there are cosmetic — the handler completes server-side, receipts land in D1).
 - Local D1: `.wrangler/state/v3/d1` — migrations applied via
   `bunx wrangler d1 migrations apply infered-routing --local`.
 - Logs/state: `~/.opencrabs/state/infered-local/`.

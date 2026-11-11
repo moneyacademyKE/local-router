@@ -48,13 +48,17 @@ The limit is **per million output tokens**, not per request. It does not cap inp
 
 For both JSON and SSE responses, a leading, complete `[Codex error: credit_balance_exhausted: You have no credits remaining ...]` refusal is treated as a failed model attempt. The router skips remaining attempts for the refused model and continues the existing chain. Streaming buffers only the possible error prefix; ordinary output and heartbeats flow normally. Once genuine answer content has been sent, it cannot be retracted and replaced with another model's answer. If all models share the same exhausted account, switching models cannot create credits.
 
+## Heartbeat: 30-minute measured availability (2026-11-11)
+
+The hourly market snapshot is unchanged. On top of it, a **30-minute heartbeat** (owner directive 2026-11-11) refreshes measured seller-quota health via the scheduled handler — both the launchd agent (`dev.moneyacad.infered.auto`, firing at minutes **2 and 32** of every hour) and the Cloudflare cron (`0,30 * * * *`). Each fire probes every roster member and persists results to the `auto-quota` row; demotion below available members applies immediately. Hourly market refresh, bucket keys, and the one-hour staleness window are intentionally unchanged — only the *measured* health signal cadence moved.
+
 ## Operations
 
 1. Apply `migrations/0002_auto_chain.sql` before deploying the Worker.
-2. Deploy `wrangler.jsonc` together with the Worker; its hourly cron expression is `0 * * * *`.
+2. Deploy `wrangler.jsonc` together with the Worker; its market cron remains hourly at `0 * * * *`; the 30-minute quota heartbeat uses `0,30 * * * *`.
 3. Inspect the current membership at `/v1/auto` and the product list at `/v1/models`.
 4. Use `bb test-all`, `bb lint` and `bb scripts/smoke.bb` as the local and post-deployment gates.
 5. The chain is available in the OpenCrabs `tupesa` model picker; adding it does not change the default model.
-6. On the local door (`wrangler dev`), the launchd agent `dev.moneyacad.infered.auto` fires the refresh via `/__scheduled` at minute 2 of every hour (`StartCalendarInterval`; `RunAtLoad` warms it at boot); the same fire measures seller-quota health for every roster member. Control: `launchctl kickstart -k gui/501/dev.moneyacad.infered.auto`.
+6. On the local door (`wrangler dev`), the launchd agent `dev.moneyacad.infered.auto` fires the refresh via `/__scheduled` at minutes **2 and 32** of every hour (a two-entry `StartCalendarInterval` array; `RunAtLoad` warms it at boot); the same fire measures seller-quota health for every roster member. Control: `launchctl kickstart -k gui/501/dev.moneyacad.infered.auto`.
 
 Verification witness: `verification/witnesses/20261110-143200-auto-quota.md` and `.json`.
