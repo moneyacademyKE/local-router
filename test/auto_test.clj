@@ -8,7 +8,7 @@
     (if (zero? exit) (json/parse-string out true)
         (throw (ex-info (str "Node eval error: " err) {:out out})))))
 
-(deftest hourly-selection-is-intelligence-ranked-and-exclusive
+(deftest auto-selection-is-intelligence-ranked-and-exclusive
   (let [res (run-node-eval
              "import { buildAutoSnapshot } from './src/router/auto.js';
               const model = (id, asks) => ({id, pricing: {asks_in: asks.map(x => x/5), asks_out: asks}});
@@ -45,7 +45,7 @@
            (:excluded res))
         "exclusions are reported with their reason and disqualifying ask")))
 
-(deftest hourly-d1-snapshot-refreshes-and-serves-stale-on-feed-failure
+(deftest auto-snapshot-refreshes-and-serves-stale-on-feed-failure
   (let [res (run-node-eval
              "import { getAutoSnapshot } from './src/router/auto.js';
               let row = null, fetches = 0, writes = 0;
@@ -72,7 +72,8 @@
                 fetches,writes,cold}));")]
     (is (= ["cx/gpt-6-astra" "ali/glm-5.3"] (:first res)))
     (is (= (:first res) (:again res)))
-    (is (= ["ali/glm-5.3"] (:next res)))
+    (is (= ["ali/glm-5.3"] (:next res))
+        "the next hour's first request refreshes the market snapshot")
     (is (false? (:nextStale res)))
     (is (= ["ali/glm-5.3"] (:staleModels res))
         "a feed outage serves the last live snapshot instead of killing the chain")

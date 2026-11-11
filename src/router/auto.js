@@ -1,4 +1,5 @@
-/** Hourly market snapshot for the owner-selected intelligence-ranked chain.
+/** Market snapshot for the owner-selected intelligence-ranked chain, rebuilt
+ * on a 30-minute heartbeat (owner rule 2026-11-11).
  * Availability is a ranking weight (owner rule 2026-11-11): a model's real price
  * is what several sellers can sustain inside the output bid, not what one lone
  * ask advertises. A book with a single in-cap seller is bait — excluded. */
@@ -6,6 +7,10 @@
 export const AUTO_MODEL = "infered/auto";
 export const AUTO_OUTPUT_BID = 0.999999;
 export const AUTO_HOUR_MS = 60 * 60 * 1000;
+// Heartbeat cadence (owner directive 2026-11-11): measured availability and
+// the scheduled refresh run every 30 minutes, without changing hourly D1 keys.
+export const AUTO_HEARTBEAT_MS = 30 * 60 * 1000;
+export const AUTO_MAX_HEARTBEAT_MS = 35 * 60 * 1000;
 
 // Cache economics (owner rule 2026-11-11; measured live the same day: an
 // identical 5,276-token prefix sent twice to ag/claude-sonnet-4-6 cached
@@ -146,7 +151,7 @@ function classifyQuotaProbe(status, message) {
 }
 
 /** Measures seller quota: one tiny completion (max_tokens 8) per member,
- * fired hourly by the scheduled handler. 200 = ok, 429 = sellers out of
+ * fired every 30 minutes by the scheduled handler. 200 = ok, 429 = sellers out of
  * quota (evidence parsed from the refusal), 403 = refused, anything else =
  * unknown — a network flake never demotes. Probes carry the output bid
  * header so measurement can never overspend. Persists best-effort to the
@@ -178,9 +183,12 @@ export async function probeQuotaHealth(env, members, fetchFn = fetch, now = Date
   try {
     await env?.ROUTING_DB?.prepare(
       "INSERT INTO auto_chain_snapshot (id, hour, payload) VALUES ('auto-quota', ?1, ?2) " +
-      "ON CONFLICT(id) DO UPDATE SET hour=excluded.hour, payload=excluded.payload " +
-      "WHERE excluded.hour > auto_chain_snapshot.hour"
+      "ON CONFLICT(id) DO UPDATE SET hour=excluded.hour, payload=excluded.payload"
     ).bind(hour, JSON.stringify(payload)).run();
+    // No freshness guard on the quota row: the heartbeat writer is single and
+    // sequential (scheduled handler only), so the newest probe battery is by
+    // construction the freshest evidence. A same-hour guard would discard
+    // every minute-32 fire (30-minute heartbeat, hourly row keys).
   } catch { /* probe persistence is best-effort; the payload is the truth */ }
   return payload;
 }

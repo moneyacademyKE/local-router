@@ -106,7 +106,7 @@ export default {
   async scheduled(_controller, env) {
     const snapshot = await getAutoSnapshot(env);
     // Seller-quota measurement (owner rule 2026-11-11): one tiny probe per
-    // member, hourly, so saturated books demote before requests burn them.
+    // member, every 30 minutes, so saturated books demote before requests burn them.
     await probeQuotaHealth(env, snapshot?.models || []).catch(() => {});
   },
   async fetch(request, env, ctx) {

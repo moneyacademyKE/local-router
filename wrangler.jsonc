@@ -6,7 +6,7 @@
   "compatibility_flags": [
     "nodejs_compat"
   ],
-  "triggers": { "crons": ["0 * * * *"] },
+  "triggers": { "crons": ["0,30 * * * *"] },
   "vars": {
     "INFERHUB_BASE_URL": "https://api.inferhub.dev/v1",
     "ROUTING_POLICY": "budget-cascade",
