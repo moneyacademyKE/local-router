@@ -33,7 +33,7 @@ Routing is data-driven from `src/router/catalog.js` — chains are plain arrays;
 
 | Product | Cascade order |
 |---|---|
-| `infered/glm-budget` *(default)* | `ali/glm-5.3` → `zai/glm-5.3` → `ali/kimi-k3.1-pro` → `cx/gpt-6.1-terra` → `ali/qwen3.8-max-0902` |
+| `infered/glm-budget` *(default)* | `ali/glm-5.3` → `zai/glm-5.3` → `grok/grok-4.7` → `ali/kimi-k3.1-pro` → `cx/gpt-6.1-terra` → `ali/qwen3.8-max-0902` |
 | `infered/astra-budget` | `cx/gpt-6-astra` → `ali/kimi-k3.1-pro` → `ali/qwen3.8-max-0902` |
 | `infered/astra-terra` | `cx/gpt-6-astra` → `cx/gpt-6.1-terra` → `ali/kimi-k3.1-pro` → `ali/qwen3.8-max-0902` |
 | `infered/terra-kimi` | `cx/gpt-6.1-terra` → `ali/kimi-k3.1-pro` → `ali/qwen3.8-max-0902` |

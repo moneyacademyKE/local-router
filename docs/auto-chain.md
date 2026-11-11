@@ -1,6 +1,6 @@
 # `infered/auto`
 
-`infered/auto` selects from the eight models in the 10 November 2026 comparison. Its fixed intelligence scores are an Artificial Analysis benchmark snapshot, not live or task-specific quality scores. The model roster and scores can be maintained in `src/router/auto.js`.
+`infered/auto` selects from the ten models in its roster (`src/router/auto.js`). Its fixed intelligence scores are an Artificial Analysis benchmark snapshot, not live or task-specific quality scores. The roster grew from the 10 November 2026 comparison: `grok/grok-4.7` (score 35.5, 9 in-cap sellers at $0.006/M out) and `ag/claude-sonnet-4-6` (score 51, 7+ in-cap sellers at $0.285/M out) joined on 11 November 2026 — the latter once its account toggle was flipped. `ag/gemini-4-argon` is market-eligible but **excluded by owner directive (2026-11-11)**; a test pin keeps it out of the roster.
 
 ## Hourly market refresh
 
