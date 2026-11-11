@@ -4,9 +4,9 @@
 
 ## Hourly market refresh
 
-The Worker refreshes a D1 snapshot at the top of each hour through a Cloudflare Cron Trigger. If a request arrives without the current hourly snapshot, it fetches an authenticated InferHub `/models` feed and creates one. The snapshot contains only models with an advertised output ask below $1 per million tokens, sorted by intelligence score; ties use lower output ask first. `GET /v1/auto` exposes the snapshot and refresh time.
+The Worker refreshes a D1 snapshot at the top of each hour through a Cloudflare Cron Trigger. If a request arrives without the current hourly snapshot, it fetches an authenticated InferHub `/models` feed and creates one. The snapshot contains only models with an advertised output ask below $1 per million tokens, sorted by intelligence score; ties use lower output ask first. `GET /v1/auto` exposes the snapshot and refresh time, a `stale` label, and an `excluded` list naming every roster model that dropped out with its reason (`not_in_feed`, `unpriced`, or `over_cap` with the disqualifying ask).
 
-A missing or stale snapshot never falls back to seeded or official prices: if the fresh feed or D1 is unavailable, auto returns an error instead of silently relaxing the limit. The snapshot's prices are observations, not a capacity guarantee. Market changes can occur between hourly refreshes.
+A missing or stale snapshot never falls back to seeded or official prices. If the fresh feed is unavailable at an hour boundary, auto serves the last live hourly snapshot labeled `stale: true` instead of failing the chain — the per-attempt output bid still enforces the ceiling, so staleness only ages the ordering, never the limit. With no snapshot at all, auto returns an error. The snapshot's prices are observations, not a capacity guarantee. Market changes can occur between hourly refreshes.
 
 ## Hard output-rate boundary
 
@@ -25,5 +25,6 @@ For both JSON and SSE responses, a leading, complete `[Codex error: credit_balan
 3. Inspect the current membership at `/v1/auto` and the product list at `/v1/models`.
 4. Use `bb test-all`, `bb lint` and `bb scripts/smoke.bb` as the local and post-deployment gates.
 5. The chain is available in the OpenCrabs `tupesa` model picker; adding it does not change the default model.
+6. On the local door (`wrangler dev`), the launchd agent `dev.moneyacad.infered.auto` fires the refresh via `/__scheduled` at minute 2 of every hour (`StartCalendarInterval`; `RunAtLoad` warms it at boot). Control: `launchctl kickstart -k gui/501/dev.moneyacad.infered.auto`.
 
 Verification witness: `verification/witnesses/20261110-143200-auto-quota.md` and `.json`.

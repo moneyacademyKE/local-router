@@ -97,6 +97,9 @@ local D1, no Cloudflare dependency for the primary door.
   KeepAlive, auto-restarts, starts at login.
 - Hourly `auto` refresh: `dev.moneyacad.infered.auto` curls
   `/__scheduled?cron=0%20*%20*%20*` (requires `--test-scheduled`, enabled).
+  Fires at minute 2 of every hour (`StartCalendarInterval` + `RunAtLoad`;
+  `StartInterval` never fired under bootstrap and was retired 2026-11-11).
+  Log: `~/.opencrabs/state/infered-local/auto-refresh.log`.
 - Local D1: `.wrangler/state/v3/d1` — migrations applied via
   `bunx wrangler d1 migrations apply infered-routing --local`.
 - Logs/state: `~/.opencrabs/state/infered-local/`.
