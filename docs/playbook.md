@@ -87,3 +87,27 @@ The INSERT in `src/router/telemetry.js` and the pin upsert in
 change the other, and add a new numbered migration — never a live ALTER
 without a repo-side migration beside it.
 
+
+## 7. Local Router Door (launchd, 2026-11-11)
+
+The router also runs on the Mac via `wrangler dev` under launchd — same code,
+local D1, no Cloudflare dependency for the primary door.
+
+- Service: `dev.moneyacad.infered` (port **8790**; 8787 is the Bankai daemon) —
+  KeepAlive, auto-restarts, starts at login.
+- Hourly `auto` refresh: `dev.moneyacad.infered.auto` curls
+  `/__scheduled?cron=0%20*%20*%20*` (requires `--test-scheduled`, enabled).
+- Local D1: `.wrangler/state/v3/d1` — migrations applied via
+  `bunx wrangler d1 migrations apply infered-routing --local`.
+- Logs/state: `~/.opencrabs/state/infered-local/`.
+- Endpoint: `http://127.0.0.1:8790/v1` (OpenCrabs provider `tupesa`).
+
+```bash
+launchctl list | grep moneyacad            # status
+launchctl kickstart -k gui/501/dev.moneyacad.infered   # restart
+launchctl bootout gui/501/dev.moneyacad.infered        # stop
+```
+
+Cloud door stays deployed at `infered-virtual-router.moneyacad.workers.dev`
+as fallback (OpenCrabs provider `tupesa-cloud`, fallback order:
+tupesa → tupesa-cloud → infer → infer-glm). Each door keeps its own D1.
