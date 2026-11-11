@@ -23,7 +23,11 @@ export const MODEL_TIERS = {
   // (AA 35.5, 8 in-cap sellers at $0.006/M out, 500K ctx) and the
   // toggle-flipped claude-sonnet-4-6 (AA 51, 7 in-cap sellers at $0.285/M out, 1M ctx).
   "grok/grok-4.7": { tier: "balanced-frontier", quality: 0.93, family: "xai", context: 500000 },
-  "ag/claude-sonnet-4-6": { tier: "agentic-coding", quality: 0.94, family: "anthropic", context: 1000000 }
+  "ag/claude-sonnet-4-6": { tier: "agentic-coding", quality: 0.94, family: "anthropic", context: 1000000 },
+  // Market's top score (AA 60.0) under the seller-quota rule 2026-11-11: the
+  // feed gives it 1M context and a two-ask book ($0.01/$0.50 out) that
+  // saturates hard — measured quota health demotes it while sellers are out.
+  "ag/gemini-4-carbon": { tier: "frontier-flagship", quality: 0.97, family: "google", context: 1048576 }
 };
 
 // Official provider list prices in USD per 1M tokens [Prompt, Completion]
@@ -47,7 +51,10 @@ export const OFFICIAL_PRICES = {
   // Market-gap wiring 2026-11-11 (owner directive; argon excluded). List
   // prices per the live feed (official_in/out, verified this turn).
   "grok/grok-4.7": { prompt: 2, completion: 6 },
-  "ag/claude-sonnet-4-6": { prompt: 3, completion: 15 }
+  "ag/claude-sonnet-4-6": { prompt: 3, completion: 15 },
+  // Carbon joined the auto pool 2026-11-11 (owner directive). List price per
+  // the live feed (official_in/out, verified this turn).
+  "ag/gemini-4-carbon": { prompt: 2, completion: 10 }
 };
 
 // Budget cascade ordering (sol removed 2026-09-05; flash/terra-5.6/kimi-k3

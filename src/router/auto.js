@@ -28,8 +28,12 @@ export const CACHE_TOKEN_COST = 0.1;
 // 2026-11-11 (owner directive, market-gap wiring): grok-4.7 (35.5, 8 in-cap
 // sellers) and claude-sonnet-4-6 (51, 7 in-cap sellers, account toggle
 // flipped) join the pool. ag/gemini-4-argon stays OUT — explicit owner
-// exclusion despite market eligibility.
+// exclusion despite market eligibility. Same day: ag/gemini-4-carbon (60.0,
+// the market's top score) joins under the seller-quota rule — its thin
+// two-ask book saturates hard, and measured quota health demotes it below
+// available members until supply recovers.
 export const AUTO_MODELS = [
+  { id: "ag/gemini-4-carbon", score: 60 },
   { id: "cx/gpt-6-astra", score: 57 },
   { id: "oai/gpt-6.1-sol", score: 55 },
   { id: "cx/gpt-6.1-terra", score: 51 },
@@ -104,12 +108,104 @@ export function buildAutoSnapshot(feed, now = Date.now()) {
     models, excluded };
 }
 
+/** Seller-quota health (owner rule 2026-11-11): the feed publishes no quota
+ * data — pricing carries only asks — so availability is MEASURED: a tiny
+ * probe per member classifies the live answer. A member whose sellers are out
+ * of quota (429) or refused (403) demotes below every available member:
+ * availability gates the head slot; it is not a score tie-break. Absent,
+ * malformed, or stale quota data is a no-op, never a demotion. */
+export function applyQuotaHealth(snapshot, quota) {
+  const results = quota?.results;
+  if (!results || typeof results !== "object" || Array.isArray(results)) return snapshot;
+  const unhealthy = (m) => {
+    const status = results[m.modelId]?.status;
+    return status === "quota" || status === "refused";
+  };
+  const decorate = (m) => {
+    const r = results[m.modelId];
+    return r ? { ...m, quota: r } : m;
+  };
+  const models = snapshot.models || [];
+  const demoted = models.filter(unhealthy).map(m => ({ ...decorate(m), saturated: true }));
+  const healthy = models.filter(m => !unhealthy(m)).map(decorate);
+  return { ...snapshot, models: [...healthy, ...demoted] };
+}
+
+const QUOTA_SELLERS = /([\d,]+)\s+of\s+([\d,]+)\s+sellers/i;
+
+function classifyQuotaProbe(status, message) {
+  if (status === 200) return { status: "ok" };
+  if (status === 429) {
+    const match = QUOTA_SELLERS.exec(message || "");
+    const num = (s) => Number(s.replace(/,/g, ""));
+    return { status: "quota",
+      ...(match ? { sellersOut: num(match[1]), sellersTotal: num(match[2]) } : {}) };
+  }
+  if (status === 403) return { status: "refused" };
+  return { status: "unknown" };
+}
+
+/** Measures seller quota: one tiny completion (max_tokens 8) per member,
+ * fired hourly by the scheduled handler. 200 = ok, 429 = sellers out of
+ * quota (evidence parsed from the refusal), 403 = refused, anything else =
+ * unknown — a network flake never demotes. Probes carry the output bid
+ * header so measurement can never overspend. Persists best-effort to the
+ * auto-quota row; the returned payload is the truth either way. */
+export async function probeQuotaHealth(env, members, fetchFn = fetch, now = Date.now()) {
+  const baseUrl = env?.INFERHUB_BASE_URL || "https://api.inferhub.dev/v1";
+  const results = {};
+  for (const member of members) {
+    const started = Date.now();
+    let outcome = { status: "unknown" };
+    try {
+      const response = await fetchFn(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json",
+          Authorization: `Bearer ${env?.INFERHUB_API_KEY}`,
+          "x-max-output-price": String(AUTO_OUTPUT_BID) },
+        body: JSON.stringify({ model: member.modelId, max_tokens: 8, stream: false,
+          messages: [{ role: "user", content: "Reply with OK" }] }),
+        signal: AbortSignal.timeout(20000)
+      });
+      let message = "";
+      try { message = (await response.json())?.error?.message || ""; } catch { /* body is evidence, not a requirement */ }
+      outcome = classifyQuotaProbe(response.status, message);
+    } catch { outcome = { status: "unknown" }; }
+    results[member.modelId] = { ...outcome, ms: Date.now() - started };
+  }
+  const hour = Math.floor(now / AUTO_HOUR_MS);
+  const payload = { hour, probedAt: now, results };
+  try {
+    await env?.ROUTING_DB?.prepare(
+      "INSERT INTO auto_chain_snapshot (id, hour, payload) VALUES ('auto-quota', ?1, ?2) " +
+      "ON CONFLICT(id) DO UPDATE SET hour=excluded.hour, payload=excluded.payload " +
+      "WHERE excluded.hour > auto_chain_snapshot.hour"
+    ).bind(hour, JSON.stringify(payload)).run();
+  } catch { /* probe persistence is best-effort; the payload is the truth */ }
+  return payload;
+}
+
 async function readSnapshot(db) {
   return db.prepare("SELECT hour, payload FROM auto_chain_snapshot WHERE id = 'auto'").bind().first();
 }
 
 function withStaleness(row, currentHour) {
   return { ...JSON.parse(row.payload), stale: Number(row.hour) < currentHour };
+}
+
+/** Applies measured quota health to a served snapshot. Quota data older than
+ * one hour is ignored; any read failure is a no-op — health is an
+ * enhancement, never a dependency of the chain. */
+async function withQuotaHealth(snapshot, db, hour) {
+  try {
+    const row = await db.prepare(
+      "SELECT hour, payload FROM auto_chain_snapshot WHERE id = 'auto-quota'"
+    ).bind().first();
+    if (row && Number(row.hour) >= hour - 1) {
+      return applyQuotaHealth(snapshot, JSON.parse(row.payload));
+    }
+  } catch { /* degrade to market order, never block the chain */ }
+  return snapshot;
 }
 
 /**
@@ -125,7 +221,7 @@ export async function getAutoSnapshot(env, fetchFn = fetch, now = Date.now()) {
   if (!db || !env?.INFERHUB_API_KEY) throw new Error("Auto chain needs D1 and a live market key");
   const hour = Math.floor(now / AUTO_HOUR_MS);
   let row = await readSnapshot(db);
-  if (row && Number(row.hour) === hour) return withStaleness(row, hour);
+  if (row && Number(row.hour) === hour) return withQuotaHealth(withStaleness(row, hour), db, hour);
 
   const baseUrl = env.INFERHUB_BASE_URL || "https://api.inferhub.dev/v1";
   try {
@@ -142,8 +238,8 @@ export async function getAutoSnapshot(env, fetchFn = fetch, now = Date.now()) {
     row = await readSnapshot(db);
   } catch (refreshError) {
     if (!row) throw refreshError;
-    return withStaleness(row, hour);
+    return withQuotaHealth(withStaleness(row, hour), db, hour);
   }
   if (!row) throw new Error("Auto snapshot is unavailable for this hour");
-  return withStaleness(row, hour);
+  return withQuotaHealth(withStaleness(row, hour), db, hour);
 }

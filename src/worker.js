@@ -10,7 +10,7 @@ import { executeWithFallback, executeWithChainFallback } from "./router/client.j
 import { collectAnalytics, renderAnalyticsPage } from "./ui/analytics.js";
 import { corsHeaders, jsonResponse, buildTelemetryHeaders, recordRoutingAnalytics, createStandaloneMockFetch } from "./router/telemetry.js";
 import { checkBodySize, validateChatBody, MAX_BODY_BYTES } from "./router/validate.js";
-import { AUTO_MODEL, getAutoSnapshot } from "./router/auto.js";
+import { AUTO_MODEL, getAutoSnapshot, probeQuotaHealth } from "./router/auto.js";
 
 const MAX_BODY_BYTES_STRING = MAX_BODY_BYTES;
 
@@ -104,7 +104,10 @@ function triggerBackgroundSwrSyncIfNeeded(priceCache, baseUrl, apiKey, ctx) {
 
 export default {
   async scheduled(_controller, env) {
-    await getAutoSnapshot(env);
+    const snapshot = await getAutoSnapshot(env);
+    // Seller-quota measurement (owner rule 2026-11-11): one tiny probe per
+    // member, hourly, so saturated books demote before requests burn them.
+    await probeQuotaHealth(env, snapshot?.models || []).catch(() => {});
   },
   async fetch(request, env, ctx) {
     const url = new URL(request.url);

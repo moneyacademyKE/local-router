@@ -102,3 +102,56 @@
         "stale serving never relaxes the output bid")
     (is (true? (:stale res)) "/v1/auto labels the fallback snapshot as stale")
     (is (= ["ali/qwen3.8-max-0902"] (:snapshot res)))))
+
+(deftest worker-auto-applies-quota-health-to-the-served-chain
+  (let [res (run-node-eval
+             "import worker from './src/worker.js';
+              import { buildAutoSnapshot } from './src/router/auto.js';
+              const hour = Math.floor(Date.now() / 3600000);
+              const market = buildAutoSnapshot({data: [
+                {id: 'ag/gemini-4-carbon', supports_cache: true, pricing: {asks_in: [0.002], asks_out: [0.01, 0.5]}},
+                {id: 'ag/claude-sonnet-4-6', pricing: {asks_in: [0.06], asks_out: [0.3, 0.35]}},
+                {id: 'ali/qwen3.8-max-0902', pricing: {asks_in: [0.002], asks_out: [0.006, 0.018]}}
+              ]}, Date.now());
+              const marketRow = {hour, payload: JSON.stringify(market)};
+              const quotaRow = {hour, payload: JSON.stringify({hour, probedAt: Date.now(), results: {
+                'ag/gemini-4-carbon': {status: 'quota', sellersTotal: 2221, sellersOut: 2215, ms: 412},
+                'ag/claude-sonnet-4-6': {status: 'ok', ms: 890}
+              }})};
+              const db={prepare(sql) {return {bind(...args) {return {
+                async first() {return sql.includes('auto-quota') ? quotaRow :
+                  (sql.includes('auto_chain_snapshot') ? marketRow : null);},
+                async run() {}
+              };}};}};
+              const sent = [];
+              globalThis.fetch=async (url, opts) => {
+                if (url.endsWith('/models')) throw new Error('feed must not be called: market row is current');
+                const body=JSON.parse(opts.body);
+                sent.push({model:body.model,bid:opts.headers['x-max-output-price']});
+                const answer={choices:[{index:0,delta:{content:'quota-aware serve'},finish_reason:'stop'}]};
+                return new Response('data: '+JSON.stringify(answer)+'\\n\\ndata: [DONE]\\n\\n',
+                  {status:200,headers:{'Content-Type':'text/event-stream'}});
+              };
+              const env={ROUTING_DB:db,INFERHUB_API_KEY:'key-from-test',INFERHUB_BASE_URL:'https://example.test/v1'};
+              const response=await worker.fetch(new Request('https://worker.test/v1/chat/completions',{method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({model:'infered/auto',stream:true,messages:[{role:'user',content:'hello'}]})}),env,{waitUntil(){}});
+              const body=await response.text();
+              const inspect=await worker.fetch(new Request('https://worker.test/v1/auto'),env,{waitUntil(){}});
+              const snapshot=await inspect.json();
+              const carbon=snapshot.models.filter(m=>m.modelId==='ag/gemini-4-carbon')[0]||null;
+              console.log(JSON.stringify({status:response.status,body,sent,
+                order:snapshot.models.map(m=>m.modelId),
+                carbonSaturated:carbon && carbon.saturated,
+                carbonQuota:carbon && carbon.quota,
+                stale:snapshot.stale}));")]
+    (is (= 200 (:status res)))
+    (is (.contains (:body res) "quota-aware serve"))
+    (is (= ["ag/claude-sonnet-4-6"] (mapv :model (:sent res)))
+        "the saturated carbon head is demoted below sonnet: the request never even tries it")
+    (is (every? #(= "0.999999" (:bid %)) (:sent res)))
+    (is (= ["ag/claude-sonnet-4-6" "ali/qwen3.8-max-0902" "ag/gemini-4-carbon"] (:order res))
+        "/v1/auto shows the quota-demoted order with carbon last")
+    (is (true? (:carbonSaturated res)))
+    (is (= {:status "quota" :sellersTotal 2221 :sellersOut 2215 :ms 412} (:carbonQuota res)))
+    (is (false? (:stale res)))))

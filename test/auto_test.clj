@@ -39,7 +39,8 @@
         "members report their ask depth: total asks, in-cap sellers, sustained in-cap price")
     (is (not-any? #(= "cx/gpt-6-astra" (:modelId %)) (:models res))
         "Astra must not bypass the strict ceiling")
-    (is (= [{:modelId "cx/gpt-6-astra" :reason "over_cap" :ask 1.01}
+    (is (= [{:modelId "ag/gemini-4-carbon" :reason "not_in_feed"}
+            {:modelId "cx/gpt-6-astra" :reason "over_cap" :ask 1.01}
             {:modelId "oai/gpt-6.1-terra" :reason "not_in_feed"}]
            (:excluded res))
         "exclusions are reported with their reason and disqualifying ask")))
@@ -170,3 +171,88 @@
     (is (= {:supportsCache false :effectiveInput 0.10 :effectiveBlended 0.1975}
            (:zai res))
         "models without the flag pay the full input ask: effective = raw")))
+
+(deftest quota-health-demotes-saturated-members
+  (let [res (run-node-eval
+             "import * as auto from './src/router/auto.js';
+              const apply = auto.applyQuotaHealth || ((s) => s);
+              const mk = (id, asksOut, asksIn) => ({id, supports_cache: true,
+                pricing: {asks_in: asksIn, asks_out: asksOut}});
+              const feed = {data: [
+                mk('ag/gemini-4-carbon', [0.01, 0.5], [0.002, 0.1]),
+                mk('ag/claude-sonnet-4-6', [0.3, 0.35], [0.06]),
+                mk('ali/qwen3.8-max-0902', [0.006, 0.018], [0.002])
+              ]};
+              const snapshot = auto.buildAutoSnapshot(feed, 7200000);
+              const quota = {hour: 2, probedAt: 7200000, results: {
+                'ag/gemini-4-carbon': {status: 'quota', sellersTotal: 2221, sellersOut: 2215, ms: 412},
+                'ag/claude-sonnet-4-6': {status: 'ok', ms: 890},
+                'ali/qwen3.8-max-0902': {status: 'unknown'}
+              }};
+              const demoted = apply(snapshot, quota);
+              const untouched = apply(snapshot, {hour: 2, probedAt: 7200000});
+              const carbon = demoted.models.filter(m => m.modelId === 'ag/gemini-4-carbon')[0] || null;
+              console.log(JSON.stringify({
+                order: demoted.models.map(m => m.modelId),
+                saturated: carbon && carbon.saturated,
+                carbonQuota: carbon && carbon.quota,
+                untouchedOrder: untouched.models.map(m => m.modelId)}));")]
+    (is (= ["ag/claude-sonnet-4-6" "ali/qwen3.8-max-0902" "ag/gemini-4-carbon"] (:order res))
+        "a saturated score-60 carbon demotes below available models: seller quota gates the head slot, it is not a tie-break")
+    (is (true? (:saturated res)) "the demoted member is labeled saturated")
+    (is (= {:status "quota" :sellersTotal 2221 :sellersOut 2215 :ms 412} (:carbonQuota res))
+        "the live 429's seller evidence (N of M out of quota) rides on the member")
+    (is (= ["ag/gemini-4-carbon" "ag/claude-sonnet-4-6" "ali/qwen3.8-max-0902"] (:untouchedOrder res))
+        "quota data that is absent or malformed is a no-op, never a demotion")))
+
+(deftest quota-probe-classifies-live-refusals-with-seller-evidence
+  (let [res (run-node-eval
+             "import * as auto from './src/router/auto.js';
+              const probe = auto.probeQuotaHealth;
+              if (!probe) { console.log(JSON.stringify({exported: false})); }
+              else {
+                const writes = [];
+                const db = {prepare(sql) { return {bind(...args) { return {
+                  async first() { return null; },
+                  async run() { writes.push({sql, args}); }
+                }; }}; }};
+                const env = {ROUTING_DB: db, INFERHUB_API_KEY: 'k', INFERHUB_BASE_URL: 'https://example.test/v1'};
+                const members = [{modelId: 'ag/gemini-4-carbon'}, {modelId: 'ag/claude-sonnet-4-6'},
+                  {modelId: 'ali/qwen3.8-max-0902'}, {modelId: 'cx/gpt-6-astra'}];
+                const bodies = [];
+                const fetchFn = async (url, opts) => {
+                  const body = JSON.parse(opts.body);
+                  bodies.push({model: body.model, maxTokens: body.max_tokens, bid: opts.headers['x-max-output-price']});
+                  if (body.model === 'ag/gemini-4-carbon')
+                    return new Response(JSON.stringify({error: {code: 'capacity_saturated',
+                      message: '2,215 of 2,221 sellers out of quota or cooling down'}}), {status: 429});
+                  if (body.model === 'ag/claude-sonnet-4-6')
+                    return new Response(JSON.stringify({error: {code: 'model_disabled',
+                      message: 'model disabled in your preferences'}}), {status: 403});
+                  if (body.model === 'cx/gpt-6-astra')
+                    return new Response('gateway', {status: 502});
+                  return new Response(JSON.stringify({choices: [{message: {content: 'OK'}}]}), {status: 200});
+                };
+                const health = await probe(env, members, fetchFn, 7200000);
+                const write = writes.find(w => w.sql.includes('auto-quota')) || null;
+                const persisted = write ? JSON.parse(write.args[1]) : null;
+                const slim = (r) => Object.fromEntries(Object.entries(r).map(([k, v]) =>
+                  [k, {status: v.status, sellersTotal: v.sellersTotal, sellersOut: v.sellersOut}]));
+                console.log(JSON.stringify({exported: true, results: slim(health.results),
+                  probed: bodies.map(b => b.model), bid: bodies.every(b => b.bid === '0.999999'),
+                  tokens: bodies.every(b => b.maxTokens === 8),
+                  persistedResults: persisted && slim(persisted.results), persistedHour: persisted && persisted.hour}));}")]
+    (is (true? (:exported res)) "probeQuotaHealth is exported from auto.js")
+    (is (= {:ag/gemini-4-carbon {:status "quota" :sellersTotal 2221 :sellersOut 2215}
+            :ag/claude-sonnet-4-6 {:status "refused"}
+            :ali/qwen3.8-max-0902 {:status "ok"}
+            :cx/gpt-6-astra {:status "unknown"}}
+           (:results res))
+        "a 429 parses to quota with seller evidence, a 403 to refused, a 200 to ok, anything else stays unknown")
+    (is (= ["ag/gemini-4-carbon" "ag/claude-sonnet-4-6" "ali/qwen3.8-max-0902" "cx/gpt-6-astra"] (:probed res))
+        "every member is probed sequentially")
+    (is (true? (:bid res)) "probes carry the output bid header: measurement can never overspend")
+    (is (true? (:tokens res)) "probes are tiny: max_tokens 8")
+    (is (= (:results res) (:persistedResults res))
+        "the probe payload persists to the auto-quota row verbatim")
+    (is (= 2 (:persistedHour res)))))

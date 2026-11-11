@@ -27,7 +27,11 @@ const MODEL_SPOT_MULTIPLIERS = {
   "oai/gpt-6.1-sol": [0.0170, 0.0180, 0.0200],     // $10.00 * 0.017 = $0.17 (feed min ask)
   "oai/gpt-6.1-terra": [0.0170, 0.0180, 0.0200],   // $5.00 * 0.017 = $0.085 (feed min ask)
   "grok/grok-4.7": [0.0010, 0.0050, 0.0190],      // $6.00 * 0.001 = $0.006 (feed min ask, 13 asks, 8 in-cap)
-  "ag/claude-sonnet-4-6": [0.0190, 0.0200, 0.0380] // $15.00 * 0.019 = $0.285 (feed min ask, 47 asks, 7 in-cap)
+  "ag/claude-sonnet-4-6": [0.0190, 0.0200, 0.0380], // $15.00 * 0.019 = $0.285 (feed min ask, 47 asks, 7 in-cap)
+  // Carbon: real ladder is exactly two asks — $0.01/$0.50 out, $0.002/$0.10 in
+  // (feed snapshot 2026-11-11). 0.001 and 0.05 reproduce both rungs exactly;
+  // 0.005 seeds the third synthetic provider between them.
+  "ag/gemini-4-carbon": [0.0010, 0.0050, 0.0500]  // $10.00 * 0.001 = $0.01 (feed min ask, 2 asks, quota-probed)
 };
 
 export function createDefaultMarketQuotes() {
