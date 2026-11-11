@@ -7,9 +7,24 @@ export const AUTO_MODEL = "infered/auto";
 export const AUTO_OUTPUT_BID = 0.999999;
 export const AUTO_HOUR_MS = 60 * 60 * 1000;
 
+// Cache economics (owner rule 2026-11-11; measured live the same day: an
+// identical 5,276-token prefix sent twice to ag/claude-sonnet-4-6 cached
+// 5,265 tokens on the repeat and billed them at 0.10x the fresh input ask —
+// the node's own asks were in $0.057 / cached $0.0057 / out $0.285, so
+// InferHub passes the upstream cache-read discount through).
+// CACHE_TOKEN_COST is that measured ratio. CACHE_HIT_RATE is the assumed
+// share of a conversation's input tokens served from cache: node-local
+// cache plus hourly book refreshes keep real traffic well below the 99.8%
+// immediate-repeat ceiling, so the assumption is deliberately conservative.
+// Both surface in /v1/auto; measured D1 rates replace them when usage rows
+// start recording cached_tokens.
+export const CACHE_HIT_RATE = 0.5;
+export const CACHE_TOKEN_COST = 0.1;
+
 // Scores are the Artificial Analysis snapshot from 2026-11-10, not live scores.
 // Equal-score listings are ordered by in-cap seller depth (availability), then
-// sustained in-cap price — never by a single seller's cheapest ask.
+// cache-adjusted blended price (25% effective input + 75% sustained in-cap
+// output) — never by a single seller's cheapest ask.
 // 2026-11-11 (owner directive, market-gap wiring): grok-4.7 (35.5, 8 in-cap
 // sellers) and claude-sonnet-4-6 (51, 7 in-cap sellers, account toggle
 // flipped) join the pool. ag/gemini-4-argon stays OUT — explicit owner
@@ -50,7 +65,8 @@ export function buildAutoSnapshot(feed, now = Date.now()) {
   const models = [];
   const excluded = [];
   for (const { id, score } of AUTO_MODELS) {
-    const pricing = entries.get(id)?.pricing;
+    const entry = entries.get(id);
+    const pricing = entry?.pricing;
     if (!pricing) { excluded.push({ modelId: id, reason: "not_in_feed" }); continue; }
     const prompt = minAsk(pricing.asks_in, pricing.min_ask_in);
     const asks = askLadder(pricing);
@@ -64,13 +80,28 @@ export function buildAutoSnapshot(feed, now = Date.now()) {
       excluded.push({ modelId: id, reason: "bait_priced", ask: inCap[0], nextAsk });
       continue;
     }
+    // Cache-adjusted pricing: a cache-capable model's returning conversation
+    // buys the cached share of its input at the cache-read rate instead of
+    // the fresh ask. The price tie-break uses the router's own 25/75
+    // input/output blend (calculateBlendedPrice's mix), so the ranking's
+    // price opinion finally includes what input costs — cache-aware.
+    const supportsCache = Boolean(entry?.supports_cache);
+    const effectiveInput = supportsCache
+      ? Number((prompt * (1 - CACHE_HIT_RATE * (1 - CACHE_TOKEN_COST))).toFixed(6))
+      : prompt;
+    const depthPrice = inCap[inCap.length - 1];
+    const effectiveBlended = Number(((0.25 * effectiveInput) + (0.75 * depthPrice)).toFixed(6));
     models.push({ modelId: id, score, prompt, completion: asks[0],
-      askCount: asks.length, inCapDepth: inCap.length, depthPrice: inCap[inCap.length - 1] });
+      askCount: asks.length, inCapDepth: inCap.length, depthPrice,
+      supportsCache, effectiveInput, effectiveBlended });
   }
   models.sort((a, b) => b.score - a.score || b.inCapDepth - a.inCapDepth ||
-    a.depthPrice - b.depthPrice || a.modelId.localeCompare(b.modelId));
+    a.effectiveBlended - b.effectiveBlended || a.modelId.localeCompare(b.modelId));
   const hour = Math.floor(now / AUTO_HOUR_MS);
-  return { hour, refreshedAt: now, nextRefreshAt: (hour + 1) * AUTO_HOUR_MS, models, excluded };
+  return { hour, refreshedAt: now, nextRefreshAt: (hour + 1) * AUTO_HOUR_MS,
+    cache: { hitRate: CACHE_HIT_RATE, tokenCost: CACHE_TOKEN_COST,
+      measured: "2026-11-11 live double-probe: 5265/5276 prefix tokens cached, cache-read billed at 0.10x fresh input ask" },
+    models, excluded };
 }
 
 async function readSnapshot(db) {

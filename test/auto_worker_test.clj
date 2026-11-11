@@ -18,7 +18,7 @@
               };}};}};
               globalThis.fetch=async (url, opts) => {
                 if (url.endsWith('/models')) {feedCalls++; return new Response(JSON.stringify({data:[
-                  {id:'oai/gpt-6.1-sol',pricing:{asks_in:[0.1],asks_out:[0.5, 0.55]}},
+                  {id:'oai/gpt-6.1-sol',supports_cache:true,pricing:{asks_in:[0.1],asks_out:[0.5, 0.55]}},
                   {id:'ali/qwen3.8-max-0902',pricing:{asks_in:[0.01],asks_out:[0.03, 0.04]}}
                 ]}),{status:200});}
                 const body=JSON.parse(opts.body);
@@ -38,7 +38,8 @@
               const snapshot=await inspect.json(); await Promise.all(promises);
               console.log(JSON.stringify({status:response.status,body,sent,feedCalls,inspectStatus:inspect.status,
                 snapshot:snapshot.models.map(m=>({id:m.modelId,askCount:m.askCount,
-                  inCapDepth:m.inCapDepth,depthPrice:m.depthPrice}))}));")]
+                  inCapDepth:m.inCapDepth,depthPrice:m.depthPrice,
+                  supportsCache:m.supportsCache,effectiveInput:m.effectiveInput}))}));")]
     (is (= 200 (:status res)))
     (is (.contains (:body res) "safe fallback"))
     (is (= ["oai/gpt-6.1-sol" "ali/qwen3.8-max-0902"] (mapv :model (:sent res))))
@@ -48,8 +49,12 @@
     (is (= 200 (:inspectStatus res)))
     (is (= [{:id "oai/gpt-6.1-sol" :askCount 2 :inCapDepth 2 :depthPrice 0.55}
             {:id "ali/qwen3.8-max-0902" :askCount 2 :inCapDepth 2 :depthPrice 0.04}]
-           (:snapshot res))
-        "/v1/auto surfaces per-model ask depth: total asks, in-cap sellers, sustained price")))
+           (mapv #(select-keys % [:id :askCount :inCapDepth :depthPrice]) (:snapshot res)))
+        "/v1/auto surfaces per-model ask depth: total asks, in-cap sellers, sustained price")
+    (is (= [{:id "oai/gpt-6.1-sol" :supportsCache true :effectiveInput 0.055}
+            {:id "ali/qwen3.8-max-0902" :supportsCache false :effectiveInput 0.01}]
+           (mapv #(select-keys % [:id :supportsCache :effectiveInput]) (:snapshot res)))
+        "/v1/auto surfaces the cache flag and the cache-adjusted input price")))
 
 (deftest worker-auto-fails-closed-without-a-durable-live-snapshot
   (let [res (run-node-eval

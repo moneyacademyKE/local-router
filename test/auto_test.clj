@@ -138,3 +138,35 @@
               }
               console.log(JSON.stringify({bids}));")]
     (is (= ["0.999999" "0.999999"] (:bids res)) "bid enforced by marketplace on both wire paths")))
+
+(deftest cache-adjusted-effective-input-orders-and-surfaces
+  (let [res (run-node-eval
+             "import { buildAutoSnapshot } from './src/router/auto.js';
+              const mk = (id, asksOut, asksIn, cache) => ({id, supports_cache: cache,
+                pricing: {asks_in: asksIn, asks_out: asksOut}});
+              const ali = mk('ali/glm-5.3', [0.235, 0.244], [0.10], true);
+              const zai = mk('zai/glm-5.3', [0.220, 0.230], [0.10], false);
+              const withCache = buildAutoSnapshot({data: [ali, zai]}, 7200000);
+              const without = buildAutoSnapshot({data: [{...ali, supports_cache: false}, zai]}, 7200000);
+              const pick = (s, id) => s.models.filter(m => m.modelId === id)[0];
+              console.log(JSON.stringify({
+                orderWithCache: withCache.models.map(m => m.modelId),
+                orderWithout: without.models.map(m => m.modelId),
+                ali: ((m) => ({supportsCache: m.supportsCache, prompt: m.prompt,
+                  effectiveInput: m.effectiveInput, effectiveBlended: m.effectiveBlended}))(pick(withCache, 'ali/glm-5.3')),
+                zai: ((m) => ({supportsCache: m.supportsCache,
+                  effectiveInput: m.effectiveInput, effectiveBlended: m.effectiveBlended}))(pick(withCache, 'zai/glm-5.3')),
+                assumptions: withCache.cache}));")]
+    (is (= 0.5 (get-in res [:assumptions :hitRate])))
+    (is (= 0.1 (get-in res [:assumptions :tokenCost]))
+        "cached tokens bill at 0.10x the fresh input ask (measured 2026-11-11: 5265/5276 prefix tokens cached, cache-read cost 5.25e-3 vs 5.7e-2)")
+    (is (= ["zai/glm-5.3" "ali/glm-5.3"] (:orderWithout res))
+        "without cache support the sustained price decides the 32-score tie")
+    (is (= ["ali/glm-5.3" "zai/glm-5.3"] (:orderWithCache res))
+        "cache support discounts the input share of the blended price and flips the tie")
+    (is (= {:supportsCache true :prompt 0.10 :effectiveInput 0.055 :effectiveBlended 0.19675}
+           (:ali res))
+        "effective input = ask * (1 - hitRate*(1 - tokenCost)) = 0.10 * 0.55")
+    (is (= {:supportsCache false :effectiveInput 0.10 :effectiveBlended 0.1975}
+           (:zai res))
+        "models without the flag pay the full input ask: effective = raw")))
