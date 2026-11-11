@@ -13,24 +13,28 @@
              "import { buildAutoSnapshot } from './src/router/auto.js';
               const model = (id, asks) => ({id, pricing: {asks_in: asks.map(x => x/5), asks_out: asks}});
               const feed = {data: [
-                model('cx/gpt-6-astra', [1.01]),
-                model('oai/gpt-6.1-sol', [0.999999, 1]),
-                model('cx/gpt-6.1-terra', [0.1]),
-                model('ali/kimi-k3.1-pro', [0.95]),
-                model('ali/qwen3.8-max-0902', [0.006]),
-                model('ali/glm-5.3', [0.035]),
-                model('zai/glm-5.3', [0.004]),
-                model('unranked/model', [0.001])
+                model('cx/gpt-6-astra', [1.01, 1.02]),
+                model('oai/gpt-6.1-sol', [0.9, 0.95]),
+                model('cx/gpt-6.1-terra', [0.1, 0.12, 0.15]),
+                model('ali/kimi-k3.1-pro', [0.95, 0.96]),
+                model('ali/qwen3.8-max-0902', [0.006, 0.018, 0.042]),
+                model('ali/glm-5.3', [0.035, 0.08, 0.09]),
+                model('zai/glm-5.3', [0.004, 0.25]),
+                model('unranked/model', [0.001, 0.002])
               ]};
               const snapshot = buildAutoSnapshot(feed, 7200000);
               console.log(JSON.stringify(snapshot));")]
     (is (= 2 (:hour res)))
     (is (= 10800000 (:nextRefreshAt res)))
     (is (= ["oai/gpt-6.1-sol" "cx/gpt-6.1-terra" "ali/kimi-k3.1-pro"
-            "ali/qwen3.8-max-0902" "zai/glm-5.3" "ali/glm-5.3"]
+            "ali/qwen3.8-max-0902" "ali/glm-5.3" "zai/glm-5.3"]
            (mapv :modelId (:models res)))
-        "oai/gpt-6.1-terra is absent from the feed and must drop out")
+        "equal scores order by in-cap seller depth before price: ali/glm (3 in-cap sellers) outranks zai/glm (2) despite zai's cheaper head ask")
     (is (every? #(< (:completion %) 1) (:models res)))
+    (is (= {:askCount 3 :inCapDepth 3 :depthPrice 0.042}
+           (select-keys (first (filter #(= "ali/qwen3.8-max-0902" (:modelId %)) (:models res)))
+                        [:askCount :inCapDepth :depthPrice]))
+        "members report their ask depth: total asks, in-cap sellers, sustained in-cap price")
     (is (not-any? #(= "cx/gpt-6-astra" (:modelId %)) (:models res))
         "Astra must not bypass the strict ceiling")
     (is (= [{:modelId "cx/gpt-6-astra" :reason "over_cap" :ask 1.01}
@@ -47,8 +51,8 @@
                 async run() { writes++; if (!row || args[0] >= row.hour) row = {hour:args[0],payload:args[1]}; }
               }; }}; }};
               const feed = async () => { fetches++; return new Response(JSON.stringify({data:[
-                {id:'cx/gpt-6-astra',pricing:{asks_in:[0.1],asks_out:[fetches === 1 ? 0.8 : 1.2]}},
-                {id:'ali/glm-5.3',pricing:{asks_in:[0.01],asks_out:[0.03]}}
+                {id:'cx/gpt-6-astra',pricing:{asks_in:[0.1],asks_out:[fetches === 1 ? 0.8 : 1.2, fetches === 1 ? 0.85 : 1.3]}},
+                {id:'ali/glm-5.3',pricing:{asks_in:[0.01],asks_out:[0.03, 0.04]}}
               ]}), {status:200}); };
               const env = { ROUTING_DB: db, INFERHUB_API_KEY:'test-key', INFERHUB_BASE_URL:'https://example.test/v1' };
               const first = await getAutoSnapshot(env, feed, 7200001);
@@ -74,6 +78,24 @@
     (is (= 2 (:fetches res)) "one live refresh per observed hour")
     (is (= 2 (:writes res)))
     (is (:cold res) "no snapshot at all still fails closed")))
+
+(deftest single-seller-books-are-bait-and-excluded
+  (let [res (run-node-eval
+             "import { buildAutoSnapshot } from './src/router/auto.js';
+              const model = (id, asks) => ({id, pricing: {asks_in: asks.map(x => x/5), asks_out: asks}});
+              const feed = {data: [
+                model('oai/gpt-6.1-sol', [0.17, 5]),
+                model('oai/gpt-6.1-terra', [0.085, 2.5]),
+                model('ali/glm-5.3', [0.035, 0.08]),
+                model('zai/glm-5.3', [0.004, 0.25])
+              ]};
+              console.log(JSON.stringify(buildAutoSnapshot(feed, 7200000)));")]
+    (is (= ["ali/glm-5.3" "zai/glm-5.3"] (mapv :modelId (:models res)))
+        "one-seller books drop out of the chain entirely: a lone ask is a price, not a market")
+    (is (= [{:modelId "oai/gpt-6.1-sol" :reason "bait_priced" :ask 0.17 :nextAsk 5}
+            {:modelId "oai/gpt-6.1-terra" :reason "bait_priced" :ask 0.085 :nextAsk 2.5}]
+           (filter #(= "bait_priced" (:reason %)) (:excluded res)))
+        "bait pricing is reported with the lone seller's ask and the cliff behind it")))
 
 (deftest strict-auto-ranking-ignores-unbounded-ladder-exemptions-and-pins
   (let [res (run-node-eval

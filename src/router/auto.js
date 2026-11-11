@@ -1,11 +1,15 @@
-/** Hourly market snapshot for the owner-selected intelligence-ranked chain. */
+/** Hourly market snapshot for the owner-selected intelligence-ranked chain.
+ * Availability is a ranking weight (owner rule 2026-11-11): a model's real price
+ * is what several sellers can sustain inside the output bid, not what one lone
+ * ask advertises. A book with a single in-cap seller is bait — excluded. */
 
 export const AUTO_MODEL = "infered/auto";
 export const AUTO_OUTPUT_BID = 0.999999;
 export const AUTO_HOUR_MS = 60 * 60 * 1000;
 
 // Scores are the Artificial Analysis snapshot from 2026-11-10, not live scores.
-// Equal-score listings are ordered by the current snapshot's lowest output ask.
+// Equal-score listings are ordered by in-cap seller depth (availability), then
+// sustained in-cap price — never by a single seller's cheapest ask.
 export const AUTO_MODELS = [
   { id: "cx/gpt-6-astra", score: 57 },
   { id: "oai/gpt-6.1-sol", score: 55 },
@@ -24,6 +28,16 @@ function minAsk(values, fallback) {
   return valid.length ? Math.min(...valid) : null;
 }
 
+/** Sorted completion asks for one model: its seller ladder. A bare min_ask_out
+ * (no ladder) is one seller at one price — a ladder of length one. */
+function askLadder(pricing) {
+  const source = Array.isArray(pricing?.asks_out) && pricing.asks_out.length
+    ? pricing.asks_out
+    : [pricing?.min_ask_out];
+  return source.filter(v => v !== null && v !== undefined && v !== "")
+    .map(Number).filter(v => Number.isFinite(v) && v >= 0).sort((a, b) => a - b);
+}
+
 export function buildAutoSnapshot(feed, now = Date.now()) {
   if (!Array.isArray(feed?.data)) throw new Error("Invalid live market response");
   const entries = new Map(feed.data.map(m => [m.id, m]));
@@ -33,12 +47,22 @@ export function buildAutoSnapshot(feed, now = Date.now()) {
     const pricing = entries.get(id)?.pricing;
     if (!pricing) { excluded.push({ modelId: id, reason: "not_in_feed" }); continue; }
     const prompt = minAsk(pricing.asks_in, pricing.min_ask_in);
-    const completion = minAsk(pricing.asks_out, pricing.min_ask_out);
-    if (prompt === null || completion === null) { excluded.push({ modelId: id, reason: "unpriced" }); continue; }
-    if (completion > AUTO_OUTPUT_BID) { excluded.push({ modelId: id, reason: "over_cap", ask: completion }); continue; }
-    models.push({ modelId: id, score, prompt, completion });
+    const asks = askLadder(pricing);
+    if (prompt === null || !asks.length) { excluded.push({ modelId: id, reason: "unpriced" }); continue; }
+    // In-cap sellers = providers offering output inside the bid: the low price
+    // tier this chain can actually buy from. Depth there is the stability weight.
+    const inCap = asks.filter(v => v <= AUTO_OUTPUT_BID);
+    if (!inCap.length) { excluded.push({ modelId: id, reason: "over_cap", ask: asks[0] }); continue; }
+    if (inCap.length === 1) {
+      const nextAsk = asks.find(v => v > AUTO_OUTPUT_BID) ?? null;
+      excluded.push({ modelId: id, reason: "bait_priced", ask: inCap[0], nextAsk });
+      continue;
+    }
+    models.push({ modelId: id, score, prompt, completion: asks[0],
+      askCount: asks.length, inCapDepth: inCap.length, depthPrice: inCap[inCap.length - 1] });
   }
-  models.sort((a, b) => b.score - a.score || a.completion - b.completion || a.modelId.localeCompare(b.modelId));
+  models.sort((a, b) => b.score - a.score || b.inCapDepth - a.inCapDepth ||
+    a.depthPrice - b.depthPrice || a.modelId.localeCompare(b.modelId));
   const hour = Math.floor(now / AUTO_HOUR_MS);
   return { hour, refreshedAt: now, nextRefreshAt: (hour + 1) * AUTO_HOUR_MS, models, excluded };
 }
