@@ -13,10 +13,9 @@
              "import { buildAutoSnapshot } from './src/router/auto.js';
               const model = (id, asks) => ({id, pricing: {asks_in: asks.map(x => x/5), asks_out: asks}});
               const feed = {data: [
-                model('cx/gpt-6-astra', [1, 1.01]),
+                model('cx/gpt-6-astra', [1.01]),
                 model('oai/gpt-6.1-sol', [0.999999, 1]),
                 model('cx/gpt-6.1-terra', [0.1]),
-                model('oai/gpt-6.1-terra', [0.9]),
                 model('ali/kimi-k3.1-pro', [0.95]),
                 model('ali/qwen3.8-max-0902', [0.006]),
                 model('ali/glm-5.3', [0.035]),
@@ -27,14 +26,19 @@
               console.log(JSON.stringify(snapshot));")]
     (is (= 2 (:hour res)))
     (is (= 10800000 (:nextRefreshAt res)))
-    (is (= ["oai/gpt-6.1-sol" "cx/gpt-6.1-terra" "oai/gpt-6.1-terra"
-            "ali/kimi-k3.1-pro" "ali/qwen3.8-max-0902" "zai/glm-5.3" "ali/glm-5.3"]
-           (mapv :modelId (:models res))))
+    (is (= ["oai/gpt-6.1-sol" "cx/gpt-6.1-terra" "ali/kimi-k3.1-pro"
+            "ali/qwen3.8-max-0902" "zai/glm-5.3" "ali/glm-5.3"]
+           (mapv :modelId (:models res)))
+        "oai/gpt-6.1-terra is absent from the feed and must drop out")
     (is (every? #(< (:completion %) 1) (:models res)))
     (is (not-any? #(= "cx/gpt-6-astra" (:modelId %)) (:models res))
-        "Astra must not bypass the strict ceiling")))
+        "Astra must not bypass the strict ceiling")
+    (is (= [{:modelId "cx/gpt-6-astra" :reason "over_cap" :ask 1.01}
+            {:modelId "oai/gpt-6.1-terra" :reason "not_in_feed"}]
+           (:excluded res))
+        "exclusions are reported with their reason and disqualifying ask")))
 
-(deftest hourly-d1-snapshot-refreshes-and-fails-closed
+(deftest hourly-d1-snapshot-refreshes-and-serves-stale-on-feed-failure
   (let [res (run-node-eval
              "import { getAutoSnapshot } from './src/router/auto.js';
               let row = null, fetches = 0, writes = 0;
@@ -50,17 +54,26 @@
               const first = await getAutoSnapshot(env, feed, 7200001);
               const again = await getAutoSnapshot(env, feed, 7200999);
               const next = await getAutoSnapshot(env, feed, 10800001);
-              let closed = false;
-              try { await getAutoSnapshot(env, async () => {throw Error('feed down');}, 14400001); }
-              catch (_) { closed = true; }
+              const stale = await getAutoSnapshot(env, async () => {throw Error('feed down');}, 14400001);
+              let cold = false;
+              const emptyDb = {prepare() { return {bind(...args) { return {async first() { return null; }, async run() {}}; }}; }};
+              try { await getAutoSnapshot({ROUTING_DB: emptyDb, INFERHUB_API_KEY:'k'}, async () => {throw Error('feed down');}, 18000001); }
+              catch (_) { cold = true; }
               console.log(JSON.stringify({first:first.models.map(x=>x.modelId), again:again.models.map(x=>x.modelId),
-                next:next.models.map(x=>x.modelId), fetches,writes,closed}));")]
+                next:next.models.map(x=>x.modelId), nextStale:next.stale,
+                staleModels:stale.models.map(x=>x.modelId), isStale:stale.stale, staleHour:stale.hour,
+                fetches,writes,cold}));")]
     (is (= ["cx/gpt-6-astra" "ali/glm-5.3"] (:first res)))
     (is (= (:first res) (:again res)))
     (is (= ["ali/glm-5.3"] (:next res)))
+    (is (false? (:nextStale res)))
+    (is (= ["ali/glm-5.3"] (:staleModels res))
+        "a feed outage serves the last live snapshot instead of killing the chain")
+    (is (true? (:isStale res)) "the stale serve is labeled, never masquerading as current")
+    (is (= 3 (:staleHour res)))
     (is (= 2 (:fetches res)) "one live refresh per observed hour")
     (is (= 2 (:writes res)))
-    (is (:closed res) "expired snapshot cannot masquerade as current when refresh fails")))
+    (is (:cold res) "no snapshot at all still fails closed")))
 
 (deftest strict-auto-ranking-ignores-unbounded-ladder-exemptions-and-pins
   (let [res (run-node-eval

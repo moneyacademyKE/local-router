@@ -56,3 +56,40 @@
               console.log(JSON.stringify({status:r.status,body:await r.json()}));")]
     (is (= 503 (:status res)))
     (is (.contains (get-in res [:body :error :message]) "no safe route"))))
+
+(deftest worker-auto-serves-stale-snapshot-when-the-feed-dies
+  (let [res (run-node-eval
+             "import worker from './src/worker.js';
+              const oldPayload = JSON.stringify({hour: 1, refreshedAt: 3600001, nextRefreshAt: 7200000,
+                models: [{modelId:'ali/qwen3.8-max-0902',score:34,prompt:0.01,completion:0.03}], excluded: []});
+              let row = {hour: 1, payload: oldPayload};
+              const db={prepare(sql) {return {bind(...args) {return {
+                async first() {return sql.includes('auto_chain_snapshot') ? row : null;},
+                async run() {if (sql.includes('INSERT INTO auto_chain_snapshot')) row={hour:args[0],payload:args[1]};}
+              };}};}};
+              const sent = [];
+              globalThis.fetch=async (url, opts) => {
+                if (url.endsWith('/models')) throw new Error('feed down');
+                const body=JSON.parse(opts.body);
+                sent.push({model:body.model,bid:opts.headers['x-max-output-price']});
+                const answer={choices:[{index:0,delta:{content:'stale but safe'},finish_reason:'stop'}]};
+                return new Response('data: '+JSON.stringify(answer)+'\\n\\ndata: [DONE]\\n\\n',
+                  {status:200,headers:{'Content-Type':'text/event-stream'}});
+              };
+              const env={ROUTING_DB:db,INFERHUB_API_KEY:'key-from-test',INFERHUB_BASE_URL:'https://example.test/v1'};
+              const response=await worker.fetch(new Request('https://worker.test/v1/chat/completions',{method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({model:'infered/auto',stream:true,messages:[{role:'user',content:'hello'}]})}),env,{waitUntil(){}});
+              const body=await response.text();
+              const inspect=await worker.fetch(new Request('https://worker.test/v1/auto'),env,{waitUntil(){}});
+              const snapshot=await inspect.json();
+              console.log(JSON.stringify({status:response.status,body,sent,
+                snapshot:snapshot.models.map(m=>m.modelId),stale:snapshot.stale}));")]
+    (is (= 200 (:status res))
+        "a feed outage at an hour boundary must not 503 the whole chain")
+    (is (.contains (:body res) "stale but safe"))
+    (is (= ["ali/qwen3.8-max-0902"] (mapv :model (:sent res))))
+    (is (every? #(= "0.999999" (:bid %)) (:sent res))
+        "stale serving never relaxes the output bid")
+    (is (true? (:stale res)) "/v1/auto labels the fallback snapshot as stale")
+    (is (= ["ali/qwen3.8-max-0902"] (:snapshot res)))))
