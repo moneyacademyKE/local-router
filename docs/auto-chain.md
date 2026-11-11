@@ -1,6 +1,6 @@
 # `infered/auto`
 
-`infered/auto` selects from the ten models in its roster (`src/router/auto.js`). Its fixed intelligence scores are an Artificial Analysis benchmark snapshot, not live or task-specific quality scores. The roster grew from the 10 November 2026 comparison: `grok/grok-4.7` (score 35.5, 9 in-cap sellers at $0.006/M out) and `ag/claude-sonnet-4-6` (score 51, 7+ in-cap sellers at $0.285/M out) joined on 11 November 2026 — the latter once its account toggle was flipped. `ag/gemini-4-argon` is market-eligible but **excluded by owner directive (2026-11-11)**; a test pin keeps it out of the roster.
+`infered/auto` selects from the eleven models in its roster (`src/router/auto.js`). Its fixed intelligence scores are an Artificial Analysis benchmark snapshot, not live or task-specific quality scores. The roster grew from the 10 November 2026 comparison: `grok/grok-4.7` (score 35.5, 9 in-cap sellers at $0.006/M out) and `ag/claude-sonnet-4-6` (score 51, 7+ in-cap sellers at $0.285/M out) joined on 11 November 2026 — the latter once its account toggle was flipped. The same day `ag/gemini-4-carbon` (score 60.0, the market's top score, $0.01–$0.50/M out asks) joined under the seller-quota rule below: its thin book saturates hard, and measured quota health demotes it below available members until supply recovers. `ag/gemini-4-argon` is market-eligible but **excluded by owner directive (2026-11-11)**; a test pin keeps it out of the roster.
 
 ## Hourly market refresh
 
@@ -11,6 +11,19 @@ The Worker refreshes a D1 snapshot at the top of each hour through a Cloudflare 
 A model's real price is what several sellers can sustain inside the bid, not what one lone ask advertises. A book with a single in-cap seller — one provider at $0.001 with the next ask at $2.50 — is bait: the cheap ask is a lottery ticket, not a market. Such models are excluded from the chain entirely, and depth is the first tie-break among equal scores, because provider count in the low price tier is a stability measure, not a vanity metric. The per-attempt bid still enforces the ceiling regardless of what the snapshot says.
 
 A missing or stale snapshot never falls back to seeded or official prices. If the fresh feed is unavailable at an hour boundary, auto serves the last live hourly snapshot labeled `stale: true` instead of failing the chain — the per-attempt output bid still enforces the ceiling, so staleness only ages the ordering, never the limit. With no snapshot at all, auto returns an error. The snapshot's prices are observations, not a capacity guarantee. Market changes can occur between hourly refreshes.
+
+## Seller-quota health (2026-11-11)
+
+The feed publishes no quota data — `pricing` carries asks and list prices, nothing about how many sellers can actually serve. So availability is **measured**: the hourly scheduled handler probes every roster member with one tiny completion (`max_tokens: 8`, carrying the same output-bid header, so measurement can never overspend) and classifies the live answer:
+
+- `200` → **ok** — a seller served.
+- `429` → **quota** — sellers out of quota or cooling down. The refusal's own evidence (`"2,215 of 2,221 sellers out of quota"`) is parsed onto the member as `sellersOut` / `sellersTotal`.
+- `403` → **refused** — the model is disabled at the account level.
+- Anything else (timeouts, 5xx, network errors) → **unknown** — a flake never demotes a healthy model.
+
+A member whose status is `quota` or `refused` is demoted below every available member, keeping its internal order — **availability gates the head slot; it is not a score tie-break**. A saturated score-60 model ranks below an available score-51 model until its sellers recover, then rises again at the next hourly snapshot. Probe results persist to the D1 `auto-quota` row and ride on each member in `/v1/auto` as `quota` (with `saturated: true` on demoted members). Quota data older than one hour is ignored, and any failure reading it degrades to market order — health is an enhancement, never a dependency of the chain.
+
+The classification is deliberately conservative: a probe that merely hangs classifies `unknown` (no demotion). A hung head is still harmless to traffic — the router's 15-second first-byte cutoff splices past it — but only an explicit refusal demotes, because a timeout can be the probe's own network, not the seller's quota.
 
 ## Cache-aware effective pricing (2026-11-11)
 
@@ -42,6 +55,6 @@ For both JSON and SSE responses, a leading, complete `[Codex error: credit_balan
 3. Inspect the current membership at `/v1/auto` and the product list at `/v1/models`.
 4. Use `bb test-all`, `bb lint` and `bb scripts/smoke.bb` as the local and post-deployment gates.
 5. The chain is available in the OpenCrabs `tupesa` model picker; adding it does not change the default model.
-6. On the local door (`wrangler dev`), the launchd agent `dev.moneyacad.infered.auto` fires the refresh via `/__scheduled` at minute 2 of every hour (`StartCalendarInterval`; `RunAtLoad` warms it at boot). Control: `launchctl kickstart -k gui/501/dev.moneyacad.infered.auto`.
+6. On the local door (`wrangler dev`), the launchd agent `dev.moneyacad.infered.auto` fires the refresh via `/__scheduled` at minute 2 of every hour (`StartCalendarInterval`; `RunAtLoad` warms it at boot); the same fire measures seller-quota health for every roster member. Control: `launchctl kickstart -k gui/501/dev.moneyacad.infered.auto`.
 
 Verification witness: `verification/witnesses/20261110-143200-auto-quota.md` and `.json`.
