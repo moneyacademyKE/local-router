@@ -103,11 +103,20 @@ function triggerBackgroundSwrSyncIfNeeded(priceCache, baseUrl, apiKey, ctx) {
 }
 
 export default {
-  async scheduled(_controller, env) {
-    const snapshot = await getAutoSnapshot(env);
-    // Seller-quota measurement (owner rule 2026-11-11): one tiny probe per
-    // member, every 30 minutes, so saturated books demote before requests burn them.
-    await probeQuotaHealth(env, snapshot?.models || []).catch(() => {});
+  async scheduled(_controller, env, ctx) {
+    // Respond fast, probe in the background: the 11-member battery runs up
+    // to ~90s serial; awaiting it made /__scheduled outlast launchd curl's
+    // patience, so the agent log was 100% (28) timeouts while D1 stayed the
+    // only real signal. waitUntil keeps the isolate alive for the battery
+    // without blocking the HTTP trigger.
+    const run = (async () => {
+      const snapshot = await getAutoSnapshot(env);
+      // Seller-quota measurement (owner rule 2026-11-11): one tiny probe per
+      // member, every 30 minutes, so saturated books demote before requests burn them.
+      await probeQuotaHealth(env, snapshot?.models || []).catch(() => {});
+    })();
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(run);
+    else await run;
   },
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -297,7 +306,8 @@ export default {
               attempts: 0,
               latencyMs: Date.now() - requestStart,
               budgetCap: maxFallbackPrice,
-              sessionId
+              sessionId,
+              usage: cached.usage || null
             }));
             return jsonResponse(cached, 200, {
               "x-infered-cache": "HIT",
@@ -395,6 +405,11 @@ export default {
           latencyMs: metrics.latencyMs || (Date.now() - requestStart),
           budgetCap: maxFallbackPrice ?? metrics.budgetTier ?? served.budgetTier ?? null,
           sessionId,
+          // Token accounting (2026-11-12): streams carry metrics.usage from
+          // the relay's captured usage frame; non-stream results carry
+          // result.usage straight from the upstream JSON. Telemetry accepts
+          // both shapes — spend is finally measurable from the ledger alone.
+          usage: metrics.usage || result.usage || null,
           ...overrides
         }));
 

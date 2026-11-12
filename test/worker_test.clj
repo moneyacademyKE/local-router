@@ -361,3 +361,52 @@
       (is (= "ali/glm-5.3" (:bogusSelected res))
           "unknown tier values are ignored, never an error")
       (is (= 200 (:strongStatus res))))))
+
+(deftest test-usage-recorded-in-d1
+  (testing "decision rows carry real token usage + computed cost — the spend gap (2026-11-12 audit)"
+    (let [res (run-node-eval
+               "import worker from './src/worker.js';
+
+                const inserts = [];
+                const env = {
+                  INFERHUB_BASE_URL: 'https://api.inferhub.net/v1',
+                  ROUTING_DB: {
+                    prepare: (sql) => ({
+                      bind: (...args) => ({
+                        run: async () => { if (sql.includes('routing_decisions')) inserts.push(args); },
+                        first: async () => null
+                      })
+                  })
+                  }
+                };
+                const waits = [];
+                const ctx = { waitUntil: (p) => waits.push(p) };
+
+                const req = new Request('https://edge.infered.ai/v1/chat/completions', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    model: 'infered/glm-budget',
+                    stream: true,
+                    messages: [{ role: 'user', content: 'record my tokens' }]
+                  })
+                });
+                const res = await worker.fetch(req, env, ctx);
+                const reader = res.body.getReader();
+                const dec = new TextDecoder();
+                try { for (;;) { const { done, value } = await reader.read(); if (done) break; dec.decode(value, { stream: true }); } } catch (e) {}
+                await Promise.all(waits);
+
+                const row = inserts.length ? inserts[0] : [];
+                console.log(JSON.stringify({
+                  insertCount: inserts.length,
+                  promptTokens: row[10] ?? null,
+                  completionTokens: row[11] ?? null,
+                  cachedTokens: row[12] ?? null,
+                  costUsd: row[13] ?? null
+                }));")]
+      (is (= 1 (:insertCount res)) "exactly one decision row")
+      (is (= 18 (:promptTokens res)) "upstream-reported prompt tokens recorded (mock serves 18)")
+      (is (= 22 (:completionTokens res)) "upstream-reported completion tokens recorded (mock serves 22)")
+      (is (nil? (:cachedTokens res)) "no cached tokens reported → null, never a fake")
+      (is (number? (:costUsd res)) "spot-computed cost recorded when upstream reports no cost"))))

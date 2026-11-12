@@ -29,9 +29,9 @@
  */
 
 import { recordSample, recordUsage } from "./metrics.js";
-import { getOfficialPrice } from "./catalog.js";
 import { takeCompleteSseFrames, windowHasCompletionToken, jsonCompletionToSseStream } from "./sse.js";
 import { createQuotaFrameGate } from "./quota.js";
+import { streamUsage, finalizeUsage, USAGE_NEEDLE } from "./usage.js";
 
 const DEFAULT_TIMEOUT_MS = 25000;
 export const DEFAULT_FIRST_BYTE_TIMEOUT_MS = 15000;
@@ -168,17 +168,6 @@ export async function openUpstreamStream({
   }
 }
 
-function streamUsage(candidate, promptTokens, completionTokens) {
-  const official = getOfficialPrice(candidate.modelId);
-  const spot = candidate.quote || { prompt: candidate.blendedPrice, completion: candidate.blendedPrice };
-  return {
-    costUsd: Number((((promptTokens / 1e6) * (spot.prompt || 0.1)) +
-                     ((completionTokens / 1e6) * (spot.completion || 0.1))).toFixed(7)),
-    officialCostUsd: Number((((promptTokens / 1e6) * official.prompt) +
-                             ((completionTokens / 1e6) * official.completion)).toFixed(7))
-  };
-}
-
 export function executeStreamingWithSplice({
   candidates, requestBody, apiKey, metricsStore, fetchFn = fetch,
   baseUrl = "https://api.inferhub.dev/v1", timeoutMs = DEFAULT_TIMEOUT_MS,
@@ -209,6 +198,10 @@ export function executeStreamingWithSplice({
   let contentSeen = false;
   let doneSeen = false;
   let committed = false;
+  // Raw usage object from the completing candidate's usage frame — the only
+  // place token truth lives on the wire (streaming: trailing frame; adapted
+  // JSON: embedded in the chunk). Last writer is the candidate that answered.
+  let lastUsage = null;
   let settle;
   const commitGate = new Promise((resolve) => { settle = resolve; });
 
@@ -225,7 +218,11 @@ export function executeStreamingWithSplice({
     servedModel: served ? served.modelId : null,
     servedProvider: served ? served.providerId : null,
     budgetTier: served ? served.budgetTier : null,
-    attempts: attemptsUsed
+    attempts: attemptsUsed,
+    // Live at call time — usage frames arrive last, and the worker's flush
+    // hook calls getMetrics() only after the body drains, so the capture is
+    // final by then. A getter (not a snapshot) keeps splice-then-usage honest.
+    get usage() { return finalizeUsage(lastUsage, served); }
   });
 
   const writeChunk = async (chunk) => {
@@ -345,6 +342,16 @@ export function executeStreamingWithSplice({
             if (gated.quota) { refusedModels.add(candidate.modelId); return "dead"; }
             for (const frame of gated.frames) {
               if (!contentSeen && windowHasCompletionToken(frame)) contentSeen = true;
+              // Usage frame: capture the token truth for the ledger (both
+              // shapes — trailing choices-empty frame, or usage embedded in
+              // the adapted JSON chunk). JSON.parse guards against content
+              // text that merely mentions the needle.
+              if (frame.startsWith("data:") && frame.indexOf(USAGE_NEEDLE) !== -1) {
+                try {
+                  const parsed = JSON.parse(frame.slice(5).trim());
+                  if (parsed && typeof parsed.usage === "object" && parsed.usage) lastUsage = parsed.usage;
+                } catch {}
+              }
               const errorFrame = frame.includes(ERROR_NEEDLE);
               if (errorFrame && !contentSeen) {
                 heldErrorChunk = encoder.encode(frame);
@@ -408,13 +415,16 @@ export function executeStreamingWithSplice({
             ttftMs: firstCommitAt ? firstCommitAt - startedAt : null,
             success: true
           });
-          const usage = streamUsage(candidate, 20, 30);
-          recordUsage(metricsStore, {
-            modelId: candidate.modelId, providerId: candidate.providerId,
-            promptTokens: 20, completionTokens: 30,
-            costUsd: usage.costUsd, officialCostUsd: usage.officialCostUsd,
-            reason: "budget-stream"
-          });
+          if (lastUsage) {
+            const u = finalizeUsage(lastUsage, candidate);
+            recordUsage(metricsStore, {
+              modelId: candidate.modelId, providerId: candidate.providerId,
+              promptTokens: u.promptTokens || 0, completionTokens: u.completionTokens || 0,
+              costUsd: u.costUsd,
+              officialCostUsd: streamUsage(candidate, u.promptTokens || 0, u.completionTokens || 0).officialCostUsd,
+              reason: "budget-stream"
+            });
+          }
           return;
         }
 

@@ -47,8 +47,13 @@ export function buildTelemetryHeaders({ served, result }) {
 export async function recordRoutingAnalytics(env, rec) {
   try {
     if (!env?.ROUTING_DB) return;
+    // Usage accounting (2026-11-12): raw or finalized usage objects are both
+    // accepted (streams send finalized {promptTokens,...}; non-stream and
+    // cache hits send the upstream OpenAI shape {prompt_tokens,...}).
+    const u = (rec.usage && typeof rec.usage === "object") ? rec.usage : null;
+    const fin = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
     await env.ROUTING_DB.prepare(
-      "INSERT INTO routing_decisions (session_id, requested_model, selected_model, selected_provider, escalation_level, attempts, latency_ms, budget_cap, ok, error) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)"
+      "INSERT INTO routing_decisions (session_id, requested_model, selected_model, selected_provider, escalation_level, attempts, latency_ms, budget_cap, ok, error, prompt_tokens, completion_tokens, cached_tokens, cost_usd) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)"
     ).bind(
       rec.sessionId ?? null,
       rec.requestedModel ?? rec.model ?? null,
@@ -59,7 +64,11 @@ export async function recordRoutingAnalytics(env, rec) {
       rec.latencyMs ?? null,
       rec.budgetCap ?? null,
       rec.ok ? 1 : 0,
-      rec.error ?? null
+      rec.error ?? null,
+      fin(u?.promptTokens ?? u?.prompt_tokens),
+      fin(u?.completionTokens ?? u?.completion_tokens),
+      fin(u?.cachedTokens ?? u?.prompt_tokens_details?.cached_tokens),
+      fin(u?.costUsd ?? u?.cost)
     ).run();
   } catch (e) {
     // Never throw — observability must not break routing — but never be
