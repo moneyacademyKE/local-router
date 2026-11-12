@@ -70,16 +70,21 @@ bb scripts/d1-audit.bb
 bb scripts/d1-check.bb
 ```
 
-## 6. D1 Schema (migrations/0001_init.sql)
+## 6. D1 Schema (migrations/)
 The D1 schema is reproducible from the repo. `routing_decisions` + `session_pins`
-are byte-matched to the live database `infered-routing` (pull 2026-11-09).
+from `0001_init.sql` (byte-matched to the live database `infered-routing`,
+pull 2026-11-09); the auto-chain tables via `0002_auto_chain.sql`; and since
+`0003_usage.sql` (2026-11-12) every decision row also carries token usage:
+`prompt_tokens`, `completion_tokens`, `cached_tokens`, `cost_usd`. Cost prefers
+the seller-reported number from the usage frame; when absent it is computed
+from the serving candidate's spot asks (`src/router/usage.js`). Spend and
+cache engagement are now measurable from the ledger alone — before 0003 the
+rows recorded success but not one token.
 
 ```bash
-# Apply to remote (idempotent — safe to re-run)
-bunx wrangler d1 execute infered-routing --remote --file migrations/0001_init.sql
-
-# Local dev copy
-bunx wrangler d1 execute infered-routing --file migrations/0001_init.sql
+# Apply migrations (idempotent via D1 migrations tracking)
+bunx wrangler d1 migrations apply infered-routing --remote
+bunx wrangler d1 migrations apply infered-routing --local
 ```
 
 The INSERT in `src/router/telemetry.js` and the pin upsert in
@@ -101,8 +106,10 @@ local D1, no Cloudflare dependency for the primary door.
   measured seller-quota health (owner directive 2026-11-11); the market snapshot
   itself stays hourly (a two-entry `StartCalendarInterval` array + `RunAtLoad`;
   `StartInterval` never fired under bootstrap and was retired 2026-11-11).
-  Log: `~/.opencrabs/state/infered-local/auto-refresh.log` (curl 28s timeouts
-  there are cosmetic — the handler completes server-side, receipts land in D1).
+  Log: `~/.opencrabs/state/infered-local/auto-refresh.log` (clean since
+  2026-11-12: the scheduled handler hands the probe battery to `ctx.waitUntil`
+  and responds in ~30ms — the old 30s curl timeouts were the handler blocking
+  on the battery; D1 was always the real signal).
 - Local D1: `.wrangler/state/v3/d1` — migrations applied via
   `bunx wrangler d1 migrations apply infered-routing --local`.
 - Logs/state: `~/.opencrabs/state/infered-local/`.
