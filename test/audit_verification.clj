@@ -50,7 +50,7 @@
             updateSpotPrices(cache4, [
               { providerId: 'inferhub-alpha', modelId: 'cx/gpt-5.6-sol', prompt: 0.05, completion: 0.25 },
               { providerId: 'inferhub-alpha', modelId: 'zai/glm-5.3-flash', prompt: 0.05, completion: 0.15 },
-              { providerId: 'inferhub-alpha', modelId: 'zai/glm-5.3', prompt: 0.05, completion: 0.25 }
+              { providerId: 'inferhub-alpha', modelId: 'test/retired-glm-model', prompt: 0.05, completion: 0.25 }
             ]);
             const cand4 = rankCandidates({ model: 'infered/sol-budget', priceCache: cache4, metricsStore });
 
@@ -78,7 +78,7 @@
   (println "----------------------------------------------------------")
   (if (and (= "cx/gpt-5.6-sol" (:s1_model res))
            (= "zai/glm-5.3-flash" (:s2_model res))
-           (= "zai/glm-5.3" (:s3_model res))
+           (= "test/retired-glm-model" (:s3_model res))
            (= "zai/glm-5.3-flash" (:s4_model res))
            (= 0.2 (:s4_tier res))
            (= 1 (:s4_escalationLevel res)))

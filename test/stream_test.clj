@@ -336,7 +336,7 @@
                 const result = await executeWithFallback({
                   candidates: [
                     { providerId: 'corpse-node', modelId: 'zai/glm-5.3-flash', savingsPct: 98, blendedPrice: 0.04 },
-                    { providerId: 'healthy-node', modelId: 'zai/glm-5.3', savingsPct: 95, blendedPrice: 0.06 }
+                    { providerId: 'healthy-node', modelId: 'test/retired-glm-model', savingsPct: 95, blendedPrice: 0.06 }
                   ],
                   requestBody: { stream: true, messages: [{ role: 'user', content: 'hi' }] },
                   apiKey: 'test-key',
@@ -461,7 +461,7 @@
                 const result = await executeWithFallback({
                   candidates: [
                     { providerId: 'dying-node', modelId: 'zai/glm-5.3-flash', savingsPct: 98, blendedPrice: 0.04 },
-                    { providerId: 'healthy-node', modelId: 'zai/glm-5.3', savingsPct: 95, blendedPrice: 0.06 }
+                    { providerId: 'healthy-node', modelId: 'test/retired-glm-model', savingsPct: 95, blendedPrice: 0.06 }
                   ],
                   requestBody: { stream: true, messages: [{ role: 'user', content: 'hi' }] },
                   apiKey: 'test-key',

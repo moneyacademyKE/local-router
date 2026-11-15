@@ -17,25 +17,25 @@
                 const blended = calculateBlendedPrice(0.01, 0.06);
                 const cache = createPriceCache();
 
-                const glmQuotes = getQuotesForModel(cache, 'zai/glm-5.3');
+                const glmQuotes = getQuotesForModel(cache, 'ali/glm-5.3');
                 const kimi31Quotes = getQuotesForModel(cache, 'ali/kimi-k3.1-pro');
                 const terra61Quotes = getQuotesForModel(cache, 'cx/gpt-6.1-terra');
-                const qwenQuotes = getQuotesForModel(cache, 'ali/qwen3.8-max-0902');
+                const grokQuotes = getQuotesForModel(cache, 'grok/grok-4.7');
 
                 console.log(JSON.stringify({
                   blended,
                   glmOutput: glmQuotes[0].completion,
                   kimi31Output: kimi31Quotes[0].completion,
                   terra61Output: terra61Quotes[0].completion,
-                  qwenOutput: qwenQuotes[0].completion,
-                  budgetMembersUnderFiftyCents: [glmQuotes[0], kimi31Quotes[0], qwenQuotes[0]].every(q => q.completion <= 0.50)
+                  grokOutput: grokQuotes[0].completion,
+                  budgetMembersUnderFiftyCents: [glmQuotes[0], kimi31Quotes[0], grokQuotes[0]].every(q => q.completion <= 0.50)
                 }));")]
       (is (= 0.0475 (:blended res)))
       (is (<= (:glmOutput res) 0.50))
       (is (<= (:kimi31Output res) 0.50))
-      (is (<= (:qwenOutput res) 0.50))
+      (is (<= (:grokOutput res) 0.50))
       (is (true? (:budgetMembersUnderFiftyCents res))
-          "glm/kimi-3.1-pro/qwen seeded asks sit under the tier-0 ceiling")
+          "glm/kimi-3.1-pro/grok seeded asks sit under the tier-0 ceiling")
       (is (> (:terra61Output res) 0.50)
           "6.1-terra trades above tier-0 ($1.29 seed mirrors the live book); only the last-resort tier admits it"))))
 

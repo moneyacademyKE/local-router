@@ -23,7 +23,7 @@
                 const fetchFn = async () => new Response(frames, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
 
                 const result = await executeWithFallback({
-                  candidates: [{ providerId: 'u-node', modelId: 'zai/glm-5.3', savingsPct: 95, blendedPrice: 0.06, quote: { prompt: 0.1, completion: 0.05 } }],
+                  candidates: [{ providerId: 'u-node', modelId: 'test/retired-glm-model', savingsPct: 95, blendedPrice: 0.06, quote: { prompt: 0.1, completion: 0.05 } }],
                   requestBody: { stream: true, messages: [{ role: 'user', content: 'hi' }] },
                   apiKey: 'test-key',
                   metricsStore,

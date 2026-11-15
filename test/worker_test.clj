@@ -355,7 +355,7 @@
                   strongStatus: strongRes.status
                 }));")]
       (is (= "ali/kimi-k3.1-pro" (:strongSelected res))
-          "glm-budget's strong link is kimi-k3.1-pro — glm/qwen are skipped")
+          "glm-budget's strong link is kimi-k3.1-pro — retired members are skipped")
       (is (= "ali/glm-5.3" (:defaultSelected res))
           "no tier header keeps the budget head (ali/glm-5.3 leads since 2026-09-15)")
       (is (= "ali/glm-5.3" (:bogusSelected res))

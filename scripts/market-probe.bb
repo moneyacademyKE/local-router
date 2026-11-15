@@ -19,7 +19,6 @@
 (def models
   ["ag/gemini-4-argon"
    "ag/claude-sonnet-5-5"
-   "ag/claude-sonnet-4-6"
    "ag/claude-opus-4-6-thinking"
    "cc/claude-haiku-5-5"
    "grok/grok-4.7"

@@ -33,20 +33,20 @@ Routing is data-driven from `src/router/catalog.js` — chains are plain arrays;
 
 | Product | Cascade order |
 |---|---|
-| `infered/glm-budget` *(default)* | `ali/glm-5.3` → `zai/glm-5.3` → `grok/grok-4.7` → `ali/kimi-k3.1-pro` → `cx/gpt-6.1-terra` → `ali/qwen3.8-max-0902` |
-| `infered/astra-budget` | `cx/gpt-6-astra` → `ali/kimi-k3.1-pro` → `ali/qwen3.8-max-0902` |
-| `infered/astra-terra` | `cx/gpt-6-astra` → `cx/gpt-6.1-terra` → `ali/kimi-k3.1-pro` → `ali/qwen3.8-max-0902` |
-| `infered/terra-kimi` | `cx/gpt-6.1-terra` → `ali/kimi-k3.1-pro` → `ali/qwen3.8-max-0902` |
-| `infered/kimi-glm` | `ali/kimi-k3.1-pro` → `ali/qwen3.8-max-0902` |
+| `infered/glm-budget` *(default)* | `ali/glm-5.3` → `grok/grok-4.7` → `ali/kimi-k3.1-pro` → `cx/gpt-6.1-terra` |
+| `infered/astra-budget` | `cx/gpt-6-astra` → `ali/kimi-k3.1-pro` |
+| `infered/astra-terra` | `cx/gpt-6-astra` → `cx/gpt-6.1-terra` → `ali/kimi-k3.1-pro` |
+| `infered/terra-kimi` | `cx/gpt-6.1-terra` → `ali/kimi-k3.1-pro` |
+| `infered/kimi-glm` | `ali/kimi-k3.1-pro` |
 | `infered/solterra` | `oai/gpt-6.1-sol` → `oai/gpt-6.1-terra` |
 
 - Unknown/unregistered model names and requests without a model fall to `infered/glm-budget`.
 - Budget ladder: $0.50 tier-0 ceiling (spot asks only), then an unconstrained last-resort tier that admits official list prices (counted as `officialLastResortServes` on `/v1/metrics`).
 - `cx/gpt-6-astra` is ceiling-exempt: any verified spot ask is eligible.
-- Refreshed 2026-11-09 (owner directive): `zai/glm-5.3-flash`, `cx/gpt-5.6-terra`, `ali/kimi-k3` excised; `cx/gpt-6.1-terra` and `ali/kimi-k3.1-pro` verified enabled on the live feed; `ali/qwen3.8-max-0902` tails the five budget chains. `infered/solterra` is the explicit two-model exception (`oai/gpt-6.1-sol` → `oai/gpt-6.1-terra`, no qwen tail). Note `cx/gpt-6.1-terra`'s min ask ($1.29/M out) sits above the tier-0 ceiling — it serves at the last-resort tier until cheaper asks list.
+- Refreshed 2026-11-09 (owner directive): `zai/glm-5.3-flash`, `cx/gpt-5.6-terra`, and `ali/kimi-k3` were excised; `cx/gpt-6.1-terra` and `ali/kimi-k3.1-pro` were verified enabled on the live feed. The retired Qwen, Zai GLM, and Sonnet entries are no longer catalogued. `infered/solterra` is the explicit two-model exception (`oai/gpt-6.1-sol` → `oai/gpt-6.1-terra`) with no implicit retired tail. Note `cx/gpt-6.1-terra`'s min ask ($1.29/M out) sits above the tier-0 ceiling — it serves at the last-resort tier until cheaper asks list.
 - `X-Infered-Tier: strong` starts a chain at its designated strong link (`CHAIN_STRONG_LINKS` in catalog.js).
 - `X-Session-ID` (or an automatic conversation-head fingerprint) pins the served model within a session.
-- Raw model requests (e.g. `ali/qwen3.8-max-0902`) route to that exact model if it is registered in `MODEL_TIERS`; unregistered names fall to the default chain. Retired names (`cx/gpt-5.6-sol`, `ali/qwen3.8-max`) are excised — they land on the default chain or fail fast (403-class upstream refusals end the candidate chase immediately).
+- Raw model requests route to the exact model only when it is registered in `MODEL_TIERS`; retired or unregistered names fall to the default chain. Retired names (`cx/gpt-5.6-sol`, `ali/qwen3.8-max`) are excised — they land on the default chain or fail fast (403-class upstream refusals end the candidate chase immediately).
 
 ## 4. Tuning Pareto Weights
 You can tune weights globally via environment variables in `wrangler.jsonc` or per-request via the `X-Infered-Weights` header:

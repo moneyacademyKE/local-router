@@ -9,21 +9,16 @@ import { AUTO_MODELS } from "./auto.js";
 // Slimmed 2026-09-05 (owner directive): chain members plus owner-designated
 // raw models are catalogued — the router sells the cascade chains, not a
 // model zoo. MODEL_TIERS presence is what makes a raw request resolve to
-// the model itself; removed names reroute to the default budget chain
-// (qwen3.8-max-0902 raw registration + unsuffixed qwen excision: owner
-// directives 2026-09-22).
+// the model itself; removed names reroute to the default budget chain.
+// (qwen and other retired names are intentionally absent from the catalog).
 export const MODEL_TIERS = {
   "cx/gpt-6.1-terra": { tier: "balanced-frontier", quality: 0.91, family: "openai", context: 500000 },
   "oai/gpt-6.1-sol": { tier: "frontier-flagship", quality: 0.96, family: "openai", context: 1050000 },
   "oai/gpt-6.1-terra": { tier: "balanced-frontier", quality: 0.91, family: "openai", context: 1050000 },
-  "zai/glm-5.3": { tier: "agentic-coding", quality: 0.93, family: "z.ai", context: 1000000 },
   "ali/kimi-k3.1-pro": { tier: "moe-frontier", quality: 0.94, family: "moonshot", context: 1000000 },
-  "ali/qwen3.8-max-0902": { tier: "frontier-flagship", quality: 0.96, family: "qwen", context: 1000000 },
   // Market-gap wiring 2026-11-11 (owner directive; argon excluded): grok-4.7
   // (AA 35.5, 8 in-cap sellers at $0.006/M out, 500K ctx) and the
-  // toggle-flipped claude-sonnet-4-6 (AA 51, 7 in-cap sellers at $0.285/M out, 1M ctx).
   "grok/grok-4.7": { tier: "balanced-frontier", quality: 0.93, family: "xai", context: 500000 },
-  "ag/claude-sonnet-4-6": { tier: "agentic-coding", quality: 0.94, family: "anthropic", context: 1000000 },
   // Market's top score (AA 60.0) under the seller-quota rule 2026-11-11: the
   // feed gives it 1M context and a two-ask book ($0.01/$0.50 out) that
   // saturates hard — measured quota health demotes it while sellers are out.
@@ -33,42 +28,29 @@ export const MODEL_TIERS = {
 // Official provider list prices in USD per 1M tokens [Prompt, Completion]
 export const OFFICIAL_PRICES = {
   "cx/gpt-6-astra": { prompt: 10, completion: 50 },
-  // ali-hosted glm-5.3 list price per the InferHub market feed (official_in/out,
-  // verified 2026-09-15) — a different listing from zai-hosted glm-5.3 below.
+  // ali/glm-5.3 list price per the InferHub market feed (official_in/out,
+  // verified 2026-09-15).
   "ali/glm-5.3": { prompt: 1.40, completion: 4.40 },
-  // Dated qwen snapshot (owner directive 2026-09-22). List price per the
-  // InferHub feed official_in/out, verified 2026-09-22. The unsuffixed
-  // ali/qwen3.8-max was excised the same day: disabled upstream (403
-  // model_disabled on every node), so it must never be price-resolvable.
-  "ali/qwen3.8-max-0902": { prompt: 2, completion: 6 },
   "cx/gpt-6.1-terra": { prompt: 1, completion: 5 },
   "oai/gpt-6.1-sol": { prompt: 2, completion: 10 },
   "oai/gpt-6.1-terra": { prompt: 1, completion: 5 },
-  "zai/glm-5.3": { prompt: 1.40, completion: 4.40 },
   // Refreshed 2026-11-09 (owner directive): flash/terra-5.6/kimi-k3 excised;
   // 6.1-terra + kimi-k3.1-pro list prices verified against the live feed.
   "ali/kimi-k3.1-pro": { prompt: 2, completion: 10 },
   // Market-gap wiring 2026-11-11 (owner directive; argon excluded). List
   // prices per the live feed (official_in/out, verified this turn).
   "grok/grok-4.7": { prompt: 2, completion: 6 },
-  "ag/claude-sonnet-4-6": { prompt: 3, completion: 15 },
   // Carbon joined the auto pool 2026-11-11 (owner directive). List price per
   // the live feed (official_in/out, verified this turn).
   "ag/gemini-4-carbon": { prompt: 2, completion: 10 }
 };
 
-// Budget cascade ordering (sol removed 2026-09-05; flash/terra-5.6/kimi-k3
-// excised 2026-11-09 — owner directives). ali/glm-5.3 leads (min spot ask
-// $0.0352/M output, under the $0.50 tier-0 ceiling); qwen-0902 is every
-// chain's tail (owner directive 2026-11-09). grok-4.7 wired 2026-11-11
-// (owner directive, market-gap pick): $0.006/M output across 8 in-cap
-// sellers — the chain's cheapest enabled member; price ranking does the rest.
+// Budget cascade ordering: ali/glm-5.3 leads, followed by grok, kimi, and terra.
 export const GLM_BUDGET_FALLBACK_CHAIN = [
   "ali/glm-5.3",
   "grok/grok-4.7",
   "ali/kimi-k3.1-pro",
-  "cx/gpt-6.1-terra",
-  "ali/qwen3.8-max-0902"
+  "cx/gpt-6.1-terra"
 ];
 
 // Astra-headed budget cascade: the head activates automatically once
@@ -77,8 +59,7 @@ export const GLM_BUDGET_FALLBACK_CHAIN = [
 // price-exempt (see CEILING_EXEMPT_MODELS): its ask can never disqualify it.
 export const ASTRA_BUDGET_FALLBACK_CHAIN = [
   "cx/gpt-6-astra",
-  "ali/kimi-k3.1-pro",
-  "ali/qwen3.8-max-0902"
+  "ali/kimi-k3.1-pro"
 ];
 
 // Models exempt from the output-price CEILING: any ask price is acceptable.
@@ -91,26 +72,22 @@ export const CEILING_EXEMPT_MODELS = ["cx/gpt-6-astra"];
 export const ASTRA_TERRA_CHAIN = [
   "cx/gpt-6-astra",
   "cx/gpt-6.1-terra",
-  "ali/kimi-k3.1-pro",
-  "ali/qwen3.8-max-0902"
+  "ali/kimi-k3.1-pro"
 ];
 
 export const TERRA_KIMI_CHAIN = [
   "cx/gpt-6.1-terra",
-  "ali/kimi-k3.1-pro",
-  "ali/qwen3.8-max-0902"
+  "ali/kimi-k3.1-pro"
 ];
 
-// kimi-glm rides the pro reasoner; the qwen tail is the enabled -0902
-// snapshot (its unsuffixed sibling is disabled upstream — 2026-09-22
-// owner correction).
+// kimi-glm rides the pro reasoner as its sole remaining member.
+
 export const KIMI_GLM_CHAIN = [
-  "ali/kimi-k3.1-pro",
-  "ali/qwen3.8-max-0902"
+  "ali/kimi-k3.1-pro"
 ];
 
 // Explicit two-model OpenAI cascade (owner directive 2026-11-09). Sol leads;
-// Terra is the second link, with no implicit qwen tail.
+// Terra is the second link, with no implicit retired tail.
 export const SOLTERRA_CHAIN = [
   "oai/gpt-6.1-sol",
   "oai/gpt-6.1-terra"
@@ -139,18 +116,14 @@ export const DEFAULT_MODEL = "infered/glm-budget";
 
 // Designated strong link per chain — where X-Infered-Tier: strong starts the
 // cascade. Chains are ECONOMIC orderings (head = preferred under spot prices),
-// so the strong link is an explicit capability pick, not a position guess:
-// kimi-k3.1-pro carries glm-budget/terra-kimi's strong link; qwen3.8-max-0902 is
-// kimi-glm's big-gun tail (the enabled snapshot — its unsuffixed sibling
-// is disabled upstream, so strong must never start there); the astra
-// heads are already their chains' premium play (a strong start there is
-// a graceful no-op over the full chain).
+// so the strong link is an explicit capability pick, not a position guess.
+// Kimi carries the remaining reasoner link; Astra heads its premium chains.
 export const CHAIN_STRONG_LINKS = {
   "infered/glm-budget": "ali/kimi-k3.1-pro",
   "infered/astra-budget": "cx/gpt-6-astra",
   "infered/astra-terra": "cx/gpt-6-astra",
   "infered/terra-kimi": "ali/kimi-k3.1-pro",
-  "infered/kimi-glm": "ali/qwen3.8-max-0902",
+  "infered/kimi-glm": "ali/kimi-k3.1-pro",
   "infered/solterra": "oai/gpt-6.1-sol"
 };
 

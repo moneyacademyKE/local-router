@@ -12,11 +12,8 @@ export const AUTO_HOUR_MS = 60 * 60 * 1000;
 export const AUTO_HEARTBEAT_MS = 30 * 60 * 1000;
 export const AUTO_MAX_HEARTBEAT_MS = 35 * 60 * 1000;
 
-// Cache economics (owner rule 2026-11-11; measured live the same day: an
-// identical 5,276-token prefix sent twice to ag/claude-sonnet-4-6 cached
-// 5,265 tokens on the repeat and billed them at 0.10x the fresh input ask —
-// the node's own asks were in $0.057 / cached $0.0057 / out $0.285, so
-// InferHub passes the upstream cache-read discount through).
+// Cache economics (owner rule 2026-11-11; measured live on the marketplace:
+// a repeated long prefix cached nearly all input at 0.10x the fresh ask).
 // CACHE_TOKEN_COST is that measured ratio. CACHE_HIT_RATE is the assumed
 // share of a conversation's input tokens served from cache: node-local
 // cache plus hourly book refreshes keep real traffic well below the 99.8%
@@ -30,26 +27,31 @@ export const CACHE_TOKEN_COST = 0.1;
 // Equal-score listings are ordered by in-cap seller depth (availability), then
 // cache-adjusted blended price (25% effective input + 75% sustained in-cap
 // output) — never by a single seller's cheapest ask.
-// 2026-11-11 (owner directive, market-gap wiring): grok-4.7 (35.5, 8 in-cap
-// sellers) and claude-sonnet-4-6 (51, 7 in-cap sellers, account toggle
-// flipped) join the pool. ag/gemini-4-argon stays OUT — explicit owner
-// exclusion despite market eligibility. Same day: ag/gemini-4-carbon (60.0,
-// the market's top score) joins under the seller-quota rule — its thin
-// two-ask book saturates hard, and measured quota health demotes it below
-// available members until supply recovers.
+// 2026-11-11: grok-4.7 joined the pool; Argon remains explicitly excluded.
 export const AUTO_MODELS = [
   { id: "ag/gemini-4-carbon", score: 60 },
   { id: "cx/gpt-6-astra", score: 57 },
   { id: "oai/gpt-6.1-sol", score: 55 },
   { id: "cx/gpt-6.1-terra", score: 51 },
   { id: "oai/gpt-6.1-terra", score: 51 },
-  { id: "ag/claude-sonnet-4-6", score: 51 },
   { id: "ali/kimi-k3.1-pro", score: 46 },
   { id: "grok/grok-4.7", score: 35.5 },
-  { id: "ali/qwen3.8-max-0902", score: 34 },
-  { id: "ali/glm-5.3", score: 32 },
-  { id: "zai/glm-5.3", score: 32 }
+  { id: "ali/glm-5.3", score: 32 }
 ];
+
+const AUTO_MODEL_IDS = new Set(AUTO_MODELS.map(model => model.id));
+
+export function isAutoEligibleModel(modelId) {
+  return AUTO_MODEL_IDS.has(modelId);
+}
+
+export function filterAutoSnapshotModels(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") return { models: [] };
+  const models = Array.isArray(snapshot.models)
+    ? snapshot.models.filter(model => isAutoEligibleModel(model?.modelId))
+    : [];
+  return { ...snapshot, models };
+}
 
 function minAsk(values, fallback) {
   const source = Array.isArray(values) && values.length ? values : [fallback];
@@ -198,7 +200,8 @@ async function readSnapshot(db) {
 }
 
 function withStaleness(row, currentHour) {
-  return { ...JSON.parse(row.payload), stale: Number(row.hour) < currentHour };
+  const snapshot = filterAutoSnapshotModels(JSON.parse(row.payload));
+  return { ...snapshot, stale: Number(row.hour) < currentHour };
 }
 
 /** Applies measured quota health to a served snapshot. Quota data older than

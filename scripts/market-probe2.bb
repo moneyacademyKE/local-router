@@ -16,8 +16,7 @@
 (def key (get vars "INFERHUB_API_KEY"))
 
 (def models
-  ["ag/gemini-4-argon" "ag/claude-sonnet-5-5" "ag/claude-sonnet-4-6"
-   "ag/claude-opus-4-6-thinking" "cc/claude-haiku-5-5" "cb/glm-5.3"
+  ["ag/gemini-4-argon" "ag/claude-sonnet-5-5"   "ag/claude-opus-4-6-thinking" "cc/claude-haiku-5-5" "cb/glm-5.3"
    "cb/kimi-k3" "ag/gemini-4-carbon" "cc/claude-opus-5-5"
    "cc/claude-opus-4-7" "cb/deepseek-v4.1-flash" "cb/hy4-preview"
    "cb/glm-5.3-flash" "cb/minimax-m3.1-flash" "cb/kimi-k2.8-preview"

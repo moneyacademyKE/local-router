@@ -6,7 +6,7 @@
 
 (def catalog-universe
   #{"cx/gpt-6-astra" "oai/gpt-6.1-sol" "oai/gpt-6.1-terra" "cx/gpt-6.1-terra"
-    "ali/kimi-k3.1-pro" "ali/qwen3.8-max-0902" "ali/glm-5.3" "zai/glm-5.3"})
+    "ali/kimi-k3.1-pro" "ali/glm-5.3"})
 
 (defn family [id] (first (str/split (str id) #"/")))
 

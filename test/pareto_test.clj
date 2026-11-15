@@ -20,26 +20,26 @@
                 const metricsStore = createMetricsStore();
 
                 updateSpotPrices(priceCache, [
-                  { providerId: 'node-cheap', modelId: 'zai/glm-5.3', prompt: 0.02, completion: 0.04 },
-                  { providerId: 'node-fast', modelId: 'zai/glm-5.3', prompt: 0.04, completion: 0.08 },
-                  { providerId: 'node-broken', modelId: 'zai/glm-5.3', prompt: 0.01, completion: 0.03 }
+                  { providerId: 'node-cheap', modelId: 'ali/glm-5.3', prompt: 0.0001, completion: 0.0004 },
+                  { providerId: 'node-fast', modelId: 'ali/glm-5.3', prompt: 0.04, completion: 0.20 },
+                  { providerId: 'node-broken', modelId: 'ali/glm-5.3', prompt: 0.01, completion: 0.03 }
                 ]);
 
-                recordSample(metricsStore, 'node-cheap', 'zai/glm-5.3', { latencyMs: 800, ttftMs: 400, success: true });
-                recordSample(metricsStore, 'node-fast', 'zai/glm-5.3', { latencyMs: 120, ttftMs: 50, success: true });
+                recordSample(metricsStore, 'node-cheap', 'ali/glm-5.3', { latencyMs: 800, ttftMs: 400, success: true });
+                recordSample(metricsStore, 'node-fast', 'ali/glm-5.3', { latencyMs: 120, ttftMs: 50, success: true });
                 for (let i = 0; i < 5; i++) {
-                  recordSample(metricsStore, 'node-broken', 'zai/glm-5.3', { latencyMs: 5000, ttftMs: 5000, success: false });
+                  recordSample(metricsStore, 'node-broken', 'ali/glm-5.3', { latencyMs: 5000, ttftMs: 5000, success: false });
                 }
 
                 const cheapRanked = rankCandidates({
-                  model: 'zai/glm-5.3',
+                  model: 'ali/glm-5.3',
                   priceCache,
                   metricsStore,
                   weights: { price: 0.8, speed: 0.1, quality: 0.1 }
                 });
 
                 const fastRanked = rankCandidates({
-                  model: 'zai/glm-5.3',
+                  model: 'ali/glm-5.3',
                   priceCache,
                   metricsStore,
                   weights: { price: 0.1, speed: 0.8, quality: 0.1 }
@@ -85,7 +85,7 @@
                   { providerId: 'zai-node-2', modelId: 'ali/glm-5.3', prompt: 0.02, completion: 0.08 },
                   { providerId: 'kimi-node-2', modelId: 'ali/kimi-k3.1-pro', prompt: 0.20, completion: 0.40 },
                   { providerId: 'terra-node-2', modelId: 'cx/gpt-6.1-terra', prompt: 0.01, completion: 0.05 },
-                  { providerId: 'qwen-node-2', modelId: 'ali/qwen3.8-max-0902', prompt: 0.01, completion: 0.03 }
+                  { providerId: 'market-node-2', modelId: 'grok/grok-4.7', prompt: 0.01, completion: 0.03 }
                 ]);
                 const candidatesSolExpensive = rankCandidates({
                   model: 'infered/sol-budget',
@@ -105,8 +105,8 @@
                 }));")]
       (is (= "ali/glm-5.3" (:firstChoiceWhenSolCheap res)))
       (is (= "ali/glm-5.3" (:firstChoiceWhenSolExpensive res)))
-      (is (= "cx/gpt-6.1-terra" (:secondChoiceWhenSolExpensive res)))
-      (is (= "ali/qwen3.8-max-0902" (:thirdChoiceWhenSolExpensive res)))
+      (is (= "grok/grok-4.7" (:secondChoiceWhenSolExpensive res)))
+      (is (= "cx/gpt-6.1-terra" (:thirdChoiceWhenSolExpensive res)))
       (is (:isSolExcludedWhenCheap res) "cheap sol asks must not resurrect sol")
       (is (:isSolExcludedWhenExpensive res))
       (is (:isKimiExcludedDueToPrice res)))))
@@ -119,12 +119,12 @@
                 import { createMetricsStore } from './src/router/metrics.js';
 
                 const metricsStore = createMetricsStore();
-                // Only qwen has live spot asks. The other chain members are absent from
+                // Only grok has live spot asks. The other chain members are absent from
                 // the order book, so they fall back to official list prices which CANNOT
                 // prove budget compliance and must be skipped, not silently disqualified.
                 const cache = createPriceCache([]);
                 updateSpotPrices(cache, [
-                  { providerId: 'qwen-node-1', modelId: 'ali/qwen3.8-max-0902', prompt: 0.01, completion: 0.03 }
+                  { providerId: 'market-node-1', modelId: 'grok/grok-4.7', prompt: 0.01, completion: 0.03 }
                 ]);
 
                 const candidates = rankCandidates({
@@ -139,7 +139,7 @@
                   noOfficialPricedCandidates: candidates.every(c => c.quote.priceSource !== 'official'),
                   officialFallbackSkips: metricsStore.usage.officialFallbackSkips || 0
                 }));")]
-      (is (= "ali/qwen3.8-max-0902" (:topPick res)))
+      (is (= "grok/grok-4.7" (:topPick res)))
       (is (:noOfficialPricedCandidates res))
       (is (>= (:officialFallbackSkips res) 1)))))
 
@@ -162,7 +162,7 @@
                 const makeCheapCache = () => {
                   const cache = createPriceCache([]);
                   updateSpotPrices(cache, [
-                    { providerId: 'qwen-node-1', modelId: 'ali/qwen3.8-max-0902', prompt: 0.01, completion: 0.03 }
+                    { providerId: 'market-node-1', modelId: 'grok/grok-4.7', prompt: 0.01, completion: 0.03 }
                   ]);
                   return cache;
                 };
@@ -200,7 +200,7 @@
                 const cache = createPriceCache([]);
                 updateSpotPrices(cache, [
                   { providerId: 'nan-node', modelId: 'cx/gpt-5.6-sol', prompt: 'garbage', completion: 'garbage' },
-                  { providerId: 'qwen-node-2', modelId: 'ali/qwen3.8-max-0902', prompt: 0.01, completion: 0.03 }
+                  { providerId: 'market-node-2', modelId: 'grok/grok-4.7', prompt: 0.01, completion: 0.03 }
                 ]);
 
                 const candidates = rankCandidates({
@@ -214,7 +214,7 @@
                   topPick: candidates[0]?.modelId,
                   anyNanCandidate: candidates.some(c => !Number.isFinite(c.outputTokenPrice))
                 }));")]
-      (is (= "ali/qwen3.8-max-0902" (:topPick res)))
+      (is (= "grok/grok-4.7" (:topPick res)))
       (is (not (:anyNanCandidate res))))))
 
 (deftest test-model-affinity-pins-selection
@@ -301,7 +301,7 @@
                 const metricsStore = createMetricsStore();
 
                 updateSpotPrices(priceCache, [
-                  { providerId: 'n-qwen', modelId: 'ali/qwen3.8-max-0902', prompt: 0.03, completion: 0.05 },
+                  { providerId: 'market-node', modelId: 'grok/grok-4.7', prompt: 0.03, completion: 0.05 },
                   { providerId: 'n-glm', modelId: 'ali/glm-5.3', prompt: 0.10, completion: 0.08 },
                   { providerId: 'n-kimi', modelId: 'ali/kimi-k3.1-pro', prompt: 0.08, completion: 0.12 },
                   { providerId: 'n-terra', modelId: 'cx/gpt-6.1-terra', prompt: 0.15, completion: 0.20 },
@@ -324,7 +324,7 @@
           "sol must never appear in glm-budget candidates, even with a cheap spot ask")
       (is (= "ali/glm-5.3" (:solWinner res))
           "sol-budget resolves to the same sol-free chain — cheap sol asks stay invisible")
-      (is (= ["ali/glm-5.3" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra" "ali/qwen3.8-max-0902"] (:glmChain res))
+      (is (= ["ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra"] (:glmChain res))
           "full chain in cascade order — kimi-3.1-pro (0.12) and terra-6.1 (0.20) are tier-0 eligible under $0.50")
       (is (= 0 (:glmEscalation res)))
       (is (:glmIsCascade res) "must take the ordered budget-cascade path"))))
@@ -342,7 +342,7 @@
                 const noAstra = createPriceCache([]);
                 updateSpotPrices(noAstra, [
                   { providerId: 'n-kimi', modelId: 'ali/kimi-k3.1-pro', prompt: 0.08, completion: 0.12 },
-                  { providerId: 'n-qwen', modelId: 'ali/qwen3.8-max-0902', prompt: 0.10, completion: 0.08 }
+                  { providerId: 'market-node', modelId: 'grok/grok-4.7', prompt: 0.10, completion: 0.08 }
                 ]);
                 const deferred = rankCandidates({ model: 'infered/astra-budget', priceCache: noAstra, metricsStore });
 
@@ -352,7 +352,7 @@
                 updateSpotPrices(withAstra, [
                   { providerId: 'n-astra', modelId: 'cx/gpt-6-astra', prompt: 0.50, completion: 0.25 },
                   { providerId: 'n-kimi', modelId: 'ali/kimi-k3.1-pro', prompt: 0.08, completion: 0.12 },
-                  { providerId: 'n-qwen', modelId: 'ali/qwen3.8-max-0902', prompt: 0.10, completion: 0.08 }
+                  { providerId: 'market-node', modelId: 'grok/grok-4.7', prompt: 0.10, completion: 0.08 }
                 ]);
                 const promoted = rankCandidates({ model: 'infered/astra-budget', priceCache: withAstra, metricsStore });
 
@@ -366,8 +366,8 @@
           "unquoted head is skipped; next chain position carries traffic")
       (is (not-any? #(= "cx/gpt-6-astra" %) (:deferredChain res))
           "astra must not appear as a candidate without verified spot asks")
-      (is (= ["ali/kimi-k3.1-pro" "ali/qwen3.8-max-0902"] (:deferredChain res))
-          "kimi-3.1-pro (0.12) and qwen (0.08) are tier-0 eligible under the $0.50 ceiling; only the unquoted astra is deferred")
+      (is (= ["ali/kimi-k3.1-pro"] (:deferredChain res))
+          "kimi-3.1-pro (0.12) and grok (0.08) are tier-0 eligible under the $0.50 ceiling; only the unquoted astra is deferred")
       (is (:deferredIsCascade res) "must take the ordered budget-cascade path")
       (is (= "cx/gpt-6-astra" (:promotedWinner res))
           "once the market lists astra, it becomes the head even OVER the ceiling (price-exempt)"))))
@@ -385,7 +385,7 @@
                   { providerId: 'n-zai', modelId: 'ali/glm-5.3', prompt: 0.02, completion: 0.04 },
                   { providerId: 'n-kimi', modelId: 'ali/kimi-k3.1-pro', prompt: 0.06, completion: 0.08 },
                   { providerId: 'n-terra', modelId: 'cx/gpt-6.1-terra', prompt: 0.07, completion: 0.09 },
-                  { providerId: 'n-qwen', modelId: 'ali/qwen3.8-max-0902', prompt: 0.01, completion: 0.03 }
+                  { providerId: 'market-node', modelId: 'grok/grok-4.7', prompt: 0.01, completion: 0.03 }
                 ]);
 
                 const full = rankCandidates({ model: 'infered/glm-budget', priceCache: cache, metricsStore });
@@ -399,9 +399,9 @@
                   bogusChain: bogus.map(c => c.modelId),
                   headChain: headStart.map(c => c.modelId)
                 }));")]
-      (is (= ["ali/glm-5.3" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra" "ali/qwen3.8-max-0902"]
+      (is (= ["ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra"]
              (:fullChain res)) "baseline: whole chain under the ceiling")
-      (is (= ["ali/kimi-k3.1-pro" "cx/gpt-6.1-terra" "ali/qwen3.8-max-0902"] (:slicedChain res))
+      (is (= ["ali/kimi-k3.1-pro" "cx/gpt-6.1-terra"] (:slicedChain res))
           "starting at kimi-k3.1-pro drops zai and the head — the strong tail only")
       (is (= (:fullChain res) (:bogusChain res)) "a start model outside the chain is ignored, never an error")
       (is (= (:fullChain res) (:headChain res)) "starting at the head is a graceful no-op"))))

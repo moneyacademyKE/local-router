@@ -17,7 +17,7 @@
 
                 const metricsStore = createMetricsStore();
                 // Every open returns the account-level disable InferHub serves
-                // for ali/qwen3.8-max (reproduced live 2026-09-22: 60s+ of
+                // for a retired Qwen model (reproduced live 2026-09-22: 60s+ of
                 // zero-byte silence while the router chased ~10 dead nodes).
                 // All three candidates are nodes of the SAME model — the exact
                 // original chase disease. (Different models each get their one

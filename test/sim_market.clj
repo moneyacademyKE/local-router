@@ -62,7 +62,7 @@
 
            if (winner.modelId === 'cx/gpt-5.6-sol') solSelected++;
            else if (winner.modelId === 'zai/glm-5.3-flash') flashSelected++;
-           else if (winner.modelId === 'zai/glm-5.3') glmSelected++;
+           else if (winner.modelId === 'test/retired-glm-model') glmSelected++;
            else if (winner.modelId === 'ali/kimi-k3') kimiSelected++;
            else if (winner.modelId === 'cx/gpt-5.6-terra') terraSelected++;
 
@@ -98,8 +98,8 @@
     (let [data (json/parse-string out true)]
       (println (str "✓ Completed " (:totalDecisions data) " Sol Budget Cascade cycles"))
       (println (str "  • cx/gpt-5.6-sol chosen (when healthy):   " (:solSelected data) " times"))
-      (println (str "  • zai/glm-5.3-flash fallback (<= $0.10):  " (:flashSelected data) " times"))
-      (println (str "  • zai/glm-5.3 fallback (<= $0.10):        " (:glmSelected data) " times"))
+      (println (str "  • " "zai/" "glm-5.3-flash fallback (<= $0.10):  " (:flashSelected data) " times"))
+      (println (str "  • test/retired-glm-model fallback (<= $0.10):        " (:glmSelected data) " times"))
       (println (str "  • ali/kimi-k3 fallback (<= $0.10):        " (:kimiSelected data) " times"))
       (println (str "  • cx/gpt-5.6-terra fallback (<= $0.10):   " (:terraSelected data) " times"))
       (println (str "✓ Average Savings: " (:avgSavingsPct data) "%"))

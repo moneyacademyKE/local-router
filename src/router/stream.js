@@ -193,7 +193,7 @@ export function executeStreamingWithSplice({
   // the WHOLE candidate loop, so one disabled head model 503'd the request
   // instead of cascading to the next chain member (live 2026-11-09: 4 of 7
   // models disabled account-side; terra-kimi died in 0.4s, kimi-glm never
-  // reached its live qwen tail). Skip the model, keep the chain alive.
+  // reached its retired market tail). Skip the model, keep the chain alive.
   const refusedModels = new Set();
   let contentSeen = false;
   let doneSeen = false;

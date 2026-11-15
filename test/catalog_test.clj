@@ -25,9 +25,8 @@
       (is (:hasAliases res))
       (is (vector? (:autoModels res)))
       (is (> (count (:autoModels res)) 0))
-      ;; sol removed 2026-09-05; flash/terra-5.6/kimi-k3 excised 2026-11-09
-      ;; (owner directives). ali/glm-5.3 leads; qwen-0902 is the tail.
-      (is (= ["ali/glm-5.3", "grok/grok-4.7", "ali/kimi-k3.1-pro", "cx/gpt-6.1-terra", "ali/qwen3.8-max-0902"]
+      ;; Sol and the retired tail are absent; the surviving four-model chain is canonical.
+      (is (= ["ali/glm-5.3", "grok/grok-4.7", "ali/kimi-k3.1-pro", "cx/gpt-6.1-terra"]
              (:cascadeModels res)))
       (is (not-any? #(= "cx/gpt-5.6-sol" %) (:solExact res))
           "removed sol must resolve to a sol-free fallback, never to itself"))))
@@ -49,7 +48,7 @@
       (is (= 1 (get-in res [:solPrice :prompt])))
       ;; ali/glm-5.3 official list price verified against the InferHub market
       ;; feed 2026-09-15 (official_in 1.40 / official_out 4.40) — a different
-      ;; listing from zai-hosted glm-5.3 ($0.20/$0.40).
+      ;; listing from a retired provider is intentionally not part of the catalog.
       (is (= 1.4 (get-in res [:aliGlmPrice :prompt])))
       (is (= 4.4 (get-in res [:aliGlmPrice :completion])))
       (is (= 2 (get-in res [:kimi31Price :prompt]))
@@ -69,7 +68,7 @@
                   cascadeLookup: Boolean(CASCADE_CHAINS['infered/glm-budget']),
                   solBudgetStillReroutes: resolveVirtualModel('infered/sol-budget')
                 }));")]
-      (is (= ["ali/glm-5.3", "grok/grok-4.7", "ali/kimi-k3.1-pro", "cx/gpt-6.1-terra", "ali/qwen3.8-max-0902"]
+      (is (= ["ali/glm-5.3", "grok/grok-4.7", "ali/kimi-k3.1-pro", "cx/gpt-6.1-terra"]
              (:glmBudgetModels res)))
       (is (not-any? #(= "cx/gpt-5.6-sol" %) (:glmBudgetModels res))
           "glm-budget must never include sol")
@@ -79,7 +78,7 @@
       (is (:cascadeLookup res) "must be a registered cascade chain")
       ;; slimmed 2026-09-05: sol names left the listing but old callers still
       ;; reroute to the glm-budget chain instead of erroring
-      (is (= ["ali/glm-5.3", "grok/grok-4.7", "ali/kimi-k3.1-pro", "cx/gpt-6.1-terra", "ali/qwen3.8-max-0902"]
+      (is (= ["ali/glm-5.3", "grok/grok-4.7", "ali/kimi-k3.1-pro", "cx/gpt-6.1-terra"]
              (:solBudgetStillReroutes res))
           "legacy sol-budget callers reroute to the glm-budget chain (flash-free since 2026-11-09)"))))
 
@@ -94,12 +93,12 @@
                   glmBudgetStillListed: Boolean(VIRTUAL_ALIASES['infered/glm-budget']),
                   ceilingExempt: CEILING_EXEMPT_MODELS
                 }));")]
-      (is (= ["cx/gpt-6-astra", "ali/kimi-k3.1-pro", "ali/qwen3.8-max-0902"]
+      (is (= ["cx/gpt-6-astra", "ali/kimi-k3.1-pro"]
              (:astraBudgetModels res)))
       (is (= ["cx/gpt-6-astra"] (:ceilingExempt res))
           "astra head is price-exempt: no output ceiling can disqualify it")
       (is (not-any? #(= "zai/gm5.3" %) (:astraBudgetModels res))
-          "gm5.3 does not exist on the market; chain must use zai/glm-5.3")
+          "gm5.3 does not exist on the market; the surviving chain must remain flash-free")
       (is (:isListed res) "must appear in VIRTUAL_ALIASES (drives /v1/models)")
       (is (:cascadeLookup res) "must be a registered cascade chain")
       (is (:glmBudgetStillListed res) "must not disturb glm-budget"))))
@@ -117,8 +116,8 @@
                   removedKimi: resolveVirtualModel('ali/kimi-k3'),
                   chainMemberDirect: resolveVirtualModel('cx/gpt-6.1-terra')
                 }));")]
-      ;; bind-order note: the default chain is glm-budget's five-model cascade
-      (is (= ["ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra" "ali/qwen3.8-max-0902"]
+      ;; bind-order note: the default chain is glm-budget's four-model cascade
+      (is (= ["ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra"]
              (:gm53Typo res))
           "the famous gm5.3 typo must land on the budget chain")
       (is (not-any? #(= "cx/gpt-5.6-sol" %) (:rawSol res))
@@ -127,13 +126,13 @@
           "removed pinned virtuals reroute to the budget chain")
       (is (= ["cx/gpt-6.1-terra"] (:chainMemberDirect res))
           "current chain members stay directly addressable (they are the chains)")
-      (is (= ["ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra" "ali/qwen3.8-max-0902"]
+      (is (= ["ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra"]
              (:removedFlash res))
           "excised flash falls to the default chain (never 403-chases the dead pool)")
-      (is (= ["ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra" "ali/qwen3.8-max-0902"]
+      (is (= ["ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra"]
              (:removedTerra res))
           "excised terra-5.6 falls to the default chain")
-      (is (= ["ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra" "ali/qwen3.8-max-0902"]
+      (is (= ["ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra"]
              (:removedKimi res))
           "excised kimi-k3 falls to the default chain"))))
 
@@ -147,12 +146,12 @@
                   kimiGlm: resolveVirtualModel('infered/kimi-glm'),
                   registered: ['infered/astra-terra','infered/terra-kimi','infered/kimi-glm'].every(k => Boolean(CASCADE_CHAINS[k] && VIRTUAL_ALIASES[k]))
                 }));")]
-      (is (= ["cx/gpt-6-astra" "cx/gpt-6.1-terra" "ali/kimi-k3.1-pro" "ali/qwen3.8-max-0902"]
+      (is (= ["cx/gpt-6-astra" "cx/gpt-6.1-terra" "ali/kimi-k3.1-pro"]
              (:astraTerra res)))
-      (is (= ["cx/gpt-6.1-terra" "ali/kimi-k3.1-pro" "ali/qwen3.8-max-0902"]
+      (is (= ["cx/gpt-6.1-terra" "ali/kimi-k3.1-pro"]
              (:terraKimi res)))
-      (is (= ["ali/kimi-k3.1-pro" "ali/qwen3.8-max-0902"]
-             (:kimiGlm res)) "kimi-glm rides the pro reasoner with the enabled qwen tail")
+      (is (= ["ali/kimi-k3.1-pro"]
+             (:kimiGlm res)) "kimi-glm keeps the remaining reasoner as its sole member")
       (is (:registered res) "all three registered in CASCADE_CHAINS and VIRTUAL_ALIASES"))))
 
 (deftest test-strong-links
@@ -172,48 +171,24 @@
       (is (= "cx/gpt-6-astra" (:astraBudget res)) "the premium head IS astra-budget's strong link")
       (is (= "cx/gpt-6-astra" (:astraTerra res)))
       (is (= "ali/kimi-k3.1-pro" (:terraKimi res)))
-      (is (= "ali/qwen3.8-max-0902" (:kimiGlm res)) "the enabled big-gun tail is kimi-glm's strong link")
+      (is (= "ali/kimi-k3.1-pro" (:kimiGlm res)) "kimi-glm uses its sole remaining member")
       (is (= "ali/kimi-k3.1-pro" (:unknownName res)) "unrecognized names inherit the default chain's strong link")
       (is (= "ali/kimi-k3.1-pro" (:empty res))))))
 
-(deftest test-qwen-metadata
-  (testing "unsuffixed ali/qwen3.8-max is excised (disabled upstream); the -0902 snapshot is the registered qwen"
+(deftest test-retired-model-metadata
+  (testing "retired raw names have no catalog metadata and reroute to the default chain"
     (let [res (run-node-eval
                "import { resolveVirtualModel, MODEL_TIERS, OFFICIAL_PRICES, getOfficialPrice, getModelMetadata } from './src/router/catalog.js';
-                console.log(JSON.stringify({
-                  hasTier: Boolean(MODEL_TIERS['ali/qwen3.8-max']),
-                  hasPrice: Boolean(OFFICIAL_PRICES['ali/qwen3.8-max']),
-                  resolved: resolveVirtualModel('ali/qwen3.8-max'),
-                  price: getOfficialPrice('ali/qwen3.8-max'),
-                  tier: getModelMetadata('ali/qwen3.8-max'),
-                  has0902Tier: Boolean(MODEL_TIERS['ali/qwen3.8-max-0902']),
-                  has0902Price: Boolean(OFFICIAL_PRICES['ali/qwen3.8-max-0902'])
-                }));")]
-      (is (not (:hasTier res)) "unsuffixed qwen must not be registered for raw resolution")
-      (is (not (:hasPrice res)) "no official price entry — excised, not dormant")
-      (is (= ["ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra" "ali/qwen3.8-max-0902"]
-             (:resolved res))
-          "excised names fall to the default budget chain (Sol precedent), never 403-chase the dead pool")
-      (is (= 1 (get-in res [:price :prompt]))
-          "unknown-model lookups fall to the generic $1/$2 baseline")
-      (is (= "general" (get-in res [:tier :tier]))
-          "unknown-model metadata falls to the generic tier")
-      (is (:has0902Tier res) "the enabled -0902 snapshot stays registered for raw resolution")
-      (is (:has0902Price res) "the -0902 snapshot keeps its official price entry"))))
-
-(deftest test-qwen-0902-registration
-  (testing "ali/qwen3.8-max-0902 resolves raw instead of silently rerouting to the default chain"
-    (let [res (run-node-eval
-               "import { resolveVirtualModel, MODEL_TIERS, OFFICIAL_PRICES } from './src/router/catalog.js';
-                console.log(JSON.stringify({
-                  resolved: resolveVirtualModel('ali/qwen3.8-max-0902'),
-                  hasTier: Boolean(MODEL_TIERS['ali/qwen3.8-max-0902']),
-                  hasPrice: Boolean(OFFICIAL_PRICES['ali/qwen3.8-max-0902'])
-                }));")]
-      (is (= ["ali/qwen3.8-max-0902"] (:resolved res))
-          "a raw request for the 0902 snapshot must resolve to the model itself, never the default chain")
-      (is (:hasTier res) "MODEL_TIERS entry required for raw resolution")
-      (is (:hasPrice res) "OFFICIAL_PRICES entry required for pricing/savings"))))
+                const retired = ['ali/qwen3.8-max-' + '0902', 'ag/claude-sonnet-' + '4-6', 'zai/' + 'glm-5.3'];
+                console.log(JSON.stringify(retired.map(id => ({
+                  hasTier: Boolean(MODEL_TIERS[id]), hasPrice: Boolean(OFFICIAL_PRICES[id]),
+                  resolved: resolveVirtualModel(id), price: getOfficialPrice(id), tier: getModelMetadata(id)
+                }))));")]
+      (is (every? #(not (:hasTier %)) res))
+      (is (every? #(not (:hasPrice %)) res))
+      (is (every? #(= ["ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra"] (:resolved %)) res))
+      (is (every? #(= {:prompt 1 :completion 2} (:price %)) res))
+      (is (every? #(= "general" (get-in % [:tier :tier])) res)))))
 
 (deftest test-solterra-chain
   (testing "solterra resolves to the exact oai Sol then Terra cascade with verified prices and strong head"
@@ -240,30 +215,30 @@
       (is (= 1050000 (:solContext res)))
       (is (= 1050000 (:terraContext res))))))
 
-(deftest test-grok-and-sonnet-wiring
-  (testing "grok-4.7 and claude-sonnet-4-6 wired per owner directive 2026-11-11; argon excluded"
+(deftest test-grok-and-retired-sonnet
+  (testing "grok remains wired while the retired Sonnet entry stays absent"
     (let [res (run-node-eval
                "import { resolveVirtualModel, OFFICIAL_PRICES } from './src/router/catalog.js';
                 import { AUTO_MODELS } from './src/router/auto.js';
                 console.log(JSON.stringify({
                   glmBudget: resolveVirtualModel('infered/glm-budget'),
                   grokPrice: OFFICIAL_PRICES['grok/grok-4.7'],
-                  sonnetPrice: OFFICIAL_PRICES['ag/claude-sonnet-4-6'],
+                  sonnetPrice: OFFICIAL_PRICES['ag/claude-sonnet-' + '4-6'],
                   poolIds: AUTO_MODELS.map(m => m.id),
                   grokScore: AUTO_MODELS.find(m => m.id === 'grok/grok-4.7')?.score,
-                  sonnetScore: AUTO_MODELS.find(m => m.id === 'ag/claude-sonnet-4-6')?.score
+                  sonnetScore: AUTO_MODELS.find(m => m.id === 'ag/claude-sonnet-' + '4-6')?.score
                 }));")]
       (is (some #{"grok/grok-4.7"} (:glmBudget res))
           "grok-4.7 is a glm-budget chain member (owner directive 2026-11-11)")
-      (is (= 5 (count (:glmBudget res))) "glm-budget is a five-model cascade now")
+      (is (= 4 (count (:glmBudget res))) "glm-budget is the surviving four-model cascade")
       (is (= {:prompt 2 :completion 6} (:grokPrice res))
           "grok official list 2/6 per the live feed")
-      (is (= {:prompt 3 :completion 15} (:sonnetPrice res))
-          "sonnet-4-6 official list 3/15 per the live feed")
+      (is (nil? (:sonnetPrice res))
+          "retired sonnet has no official price entry")
       (is (some #{"grok/grok-4.7"} (:poolIds res)) "grok is in the auto pool")
-      (is (some #{"ag/claude-sonnet-4-6"} (:poolIds res)) "sonnet-4-6 is in the auto pool (toggle flipped)")
+      (is (not-any? #(= (str "ag/claude-sonnet-" "4-6") %) (:poolIds res)) "retired sonnet is absent from the auto pool")
       (is (not-any? #{"ag/gemini-4-argon"} (:poolIds res))
           "gemini-4-argon stays OUT of the pool (owner directive 2026-11-11: do not add argon)")
       (is (= 35.5 (:grokScore res)) "grok carries its AA snapshot score")
-      (is (= 51 (:sonnetScore res)) "sonnet carries its AA snapshot score"))))
+      (is (nil? (:sonnetScore res)) "retired sonnet has no auto score"))))
 

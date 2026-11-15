@@ -15,26 +15,23 @@
               const feed = {data: [
                 model('cx/gpt-6-astra', [1.01, 1.02]),
                 model('oai/gpt-6.1-sol', [0.9, 0.95]),
-                model('ag/claude-sonnet-4-6', [0.3, 0.35]),
                 model('cx/gpt-6.1-terra', [0.1, 0.12, 0.15]),
                 model('ali/kimi-k3.1-pro', [0.95, 0.96]),
                 model('grok/grok-4.7', [0.01, 0.02, 0.03]),
-                model('ali/qwen3.8-max-0902', [0.006, 0.018, 0.042]),
                 model('ali/glm-5.3', [0.035, 0.08, 0.09]),
-                model('zai/glm-5.3', [0.004, 0.25]),
                 model('unranked/model', [0.001, 0.002])
               ]};
               const snapshot = buildAutoSnapshot(feed, 7200000);
               console.log(JSON.stringify(snapshot));")]
     (is (= 2 (:hour res)))
     (is (= 10800000 (:nextRefreshAt res)))
-    (is (= ["oai/gpt-6.1-sol" "cx/gpt-6.1-terra" "ag/claude-sonnet-4-6" "ali/kimi-k3.1-pro"
-            "grok/grok-4.7" "ali/qwen3.8-max-0902" "ali/glm-5.3" "zai/glm-5.3"]
+    (is (= ["oai/gpt-6.1-sol" "cx/gpt-6.1-terra" "ali/kimi-k3.1-pro"
+            "grok/grok-4.7" "ali/glm-5.3"]
            (mapv :modelId (:models res)))
-        "equal scores order by in-cap seller depth before price: terra (3 in-cap) outranks sonnet (2) at 51; ali/glm (3 in-cap sellers) outranks zai/glm (2) despite zai's cheaper head ask")
+        "only the surviving auto roster is ranked")
     (is (every? #(< (:completion %) 1) (:models res)))
-    (is (= {:askCount 3 :inCapDepth 3 :depthPrice 0.042}
-           (select-keys (first (filter #(= "ali/qwen3.8-max-0902" (:modelId %)) (:models res)))
+    (is (= {:askCount 3 :inCapDepth 3 :depthPrice 0.09}
+           (select-keys (first (filter #(= "ali/glm-5.3" (:modelId %)) (:models res)))
                         [:askCount :inCapDepth :depthPrice]))
         "members report their ask depth: total asks, in-cap sellers, sustained in-cap price")
     (is (not-any? #(= "cx/gpt-6-astra" (:modelId %)) (:models res))
@@ -83,6 +80,29 @@
     (is (= 2 (:writes res)))
     (is (:cold res) "no snapshot at all still fails closed")))
 
+(deftest persisted-snapshots-drop-retired-members
+  (let [res (run-node-eval
+             "import { getAutoSnapshot } from './src/router/auto.js';
+              const row = {hour: 2, payload: JSON.stringify({hour:2, models:[
+                {modelId:'zai/' + 'glm-5.3', prompt:0.01, completion:0.01},
+                {modelId:'ali/qwen3.8-max-' + '0902', prompt:0.01, completion:0.01},
+                {modelId:'ag/claude-sonnet-' + '4-6', prompt:0.01, completion:0.01},
+                {modelId:'ali/glm-5.3', prompt:0.02, completion:0.04}
+              ]})};
+              const db = {prepare(sql) { return {bind() { return {
+                async first() { return sql.includes('auto-quota') ? null : row; },
+                async run() {}
+              }; }}; }};
+              const env = {ROUTING_DB:db, INFERHUB_API_KEY:'test-key'};
+              const current = await getAutoSnapshot(env, async () => {throw Error('must not refresh');}, 7200000);
+              const stale = await getAutoSnapshot(env, async () => {throw Error('feed down');}, 10800000);
+              console.log(JSON.stringify({current:current.models.map(m=>m.modelId),
+                stale:stale.models.map(m=>m.modelId), isStale:stale.stale}));")]
+    (is (= ["ali/glm-5.3"] (:current res)))
+    (is (= ["ali/glm-5.3"] (:stale res)))
+    (is (true? (:isStale res))
+        "current and stale D1 snapshots cannot reintroduce retired auto members")))
+
 (deftest single-seller-books-are-bait-and-excluded
   (let [res (run-node-eval
              "import { buildAutoSnapshot } from './src/router/auto.js';
@@ -91,10 +111,10 @@
                 model('oai/gpt-6.1-sol', [0.17, 5]),
                 model('oai/gpt-6.1-terra', [0.085, 2.5]),
                 model('ali/glm-5.3', [0.035, 0.08]),
-                model('zai/glm-5.3', [0.004, 0.25])
+                model('grok/grok-4.7', [0.004, 0.25])
               ]};
               console.log(JSON.stringify(buildAutoSnapshot(feed, 7200000)));")]
-    (is (= ["ali/glm-5.3" "zai/glm-5.3"] (mapv :modelId (:models res)))
+    (is (= ["grok/grok-4.7" "ali/glm-5.3"] (mapv :modelId (:models res)))
         "one-seller books drop out of the chain entirely: a lone ask is a price, not a market")
     (is (= [{:modelId "oai/gpt-6.1-sol" :reason "bait_priced" :ask 0.17 :nextAsk 5}
             {:modelId "oai/gpt-6.1-terra" :reason "bait_priced" :ask 0.085 :nextAsk 2.5}]
@@ -109,6 +129,9 @@
               const snap = {models:[
                 {modelId:'cx/gpt-6-astra',prompt:0.1,completion:1,score:57},
                 {modelId:'oai/gpt-6.1-sol',prompt:0.1,completion:0.9,score:55},
+                {modelId:'zai/' + 'glm-5.3',prompt:0.01,completion:0.01,score:32},
+                {modelId:'ali/qwen3.8-max-' + '0902',prompt:0.01,completion:0.01,score:34},
+                {modelId:'ag/claude-sonnet-' + '4-6',prompt:0.01,completion:0.01,score:51},
                 {modelId:'ali/glm-5.3',prompt:0.01,completion:0.1,score:32}
               ]};
               const rank = (cap) => rankCandidates({model:'infered/auto',autoSnapshot:snap,
@@ -147,30 +170,30 @@
               const mk = (id, asksOut, asksIn, cache) => ({id, supports_cache: cache,
                 pricing: {asks_in: asksIn, asks_out: asksOut}});
               const ali = mk('ali/glm-5.3', [0.235, 0.244], [0.10], true);
-              const zai = mk('zai/glm-5.3', [0.220, 0.230], [0.10], false);
-              const withCache = buildAutoSnapshot({data: [ali, zai]}, 7200000);
-              const without = buildAutoSnapshot({data: [{...ali, supports_cache: false}, zai]}, 7200000);
+              const grok = mk('grok/grok-4.7', [0.220, 0.230], [0.10], false);
+              const withCache = buildAutoSnapshot({data: [ali, grok]}, 7200000);
+              const without = buildAutoSnapshot({data: [{...ali, supports_cache: false}, grok]}, 7200000);
               const pick = (s, id) => s.models.filter(m => m.modelId === id)[0];
               console.log(JSON.stringify({
                 orderWithCache: withCache.models.map(m => m.modelId),
                 orderWithout: without.models.map(m => m.modelId),
                 ali: ((m) => ({supportsCache: m.supportsCache, prompt: m.prompt,
                   effectiveInput: m.effectiveInput, effectiveBlended: m.effectiveBlended}))(pick(withCache, 'ali/glm-5.3')),
-                zai: ((m) => ({supportsCache: m.supportsCache,
-                  effectiveInput: m.effectiveInput, effectiveBlended: m.effectiveBlended}))(pick(withCache, 'zai/glm-5.3')),
+                grok: ((m) => ({supportsCache: m.supportsCache,
+                  effectiveInput: m.effectiveInput, effectiveBlended: m.effectiveBlended}))(pick(withCache, 'grok/grok-4.7')),
                 assumptions: withCache.cache}));")]
     (is (= 0.5 (get-in res [:assumptions :hitRate])))
     (is (= 0.1 (get-in res [:assumptions :tokenCost]))
         "cached tokens bill at 0.10x the fresh input ask (measured 2026-11-11: 5265/5276 prefix tokens cached, cache-read cost 5.25e-3 vs 5.7e-2)")
-    (is (= ["zai/glm-5.3" "ali/glm-5.3"] (:orderWithout res))
+    (is (= ["grok/grok-4.7" "ali/glm-5.3"] (:orderWithout res))
         "without cache support the sustained price decides the 32-score tie")
-    (is (= ["ali/glm-5.3" "zai/glm-5.3"] (:orderWithCache res))
+    (is (= ["grok/grok-4.7" "ali/glm-5.3"] (:orderWithCache res))
         "cache support discounts the input share of the blended price and flips the tie")
     (is (= {:supportsCache true :prompt 0.10 :effectiveInput 0.055 :effectiveBlended 0.19675}
            (:ali res))
         "effective input = ask * (1 - hitRate*(1 - tokenCost)) = 0.10 * 0.55")
     (is (= {:supportsCache false :effectiveInput 0.10 :effectiveBlended 0.1975}
-           (:zai res))
+           (:grok res))
         "models without the flag pay the full input ask: effective = raw")))
 
 (deftest quota-health-demotes-saturated-members
@@ -181,14 +204,14 @@
                 pricing: {asks_in: asksIn, asks_out: asksOut}});
               const feed = {data: [
                 mk('ag/gemini-4-carbon', [0.01, 0.5], [0.002, 0.1]),
-                mk('ag/claude-sonnet-4-6', [0.3, 0.35], [0.06]),
-                mk('ali/qwen3.8-max-0902', [0.006, 0.018], [0.002])
+                mk('cx/gpt-6.1-terra', [0.3, 0.35], [0.06]),
+                mk('grok/grok-4.7', [0.006, 0.018], [0.002])
               ]};
               const snapshot = auto.buildAutoSnapshot(feed, 7200000);
               const quota = {hour: 2, probedAt: 7200000, results: {
                 'ag/gemini-4-carbon': {status: 'quota', sellersTotal: 2221, sellersOut: 2215, ms: 412},
-                'ag/claude-sonnet-4-6': {status: 'ok', ms: 890},
-                'ali/qwen3.8-max-0902': {status: 'unknown'}
+                'cx/gpt-6.1-terra': {status: 'ok', ms: 890},
+                'grok/grok-4.7': {status: 'unknown'}
               }};
               const demoted = apply(snapshot, quota);
               const untouched = apply(snapshot, {hour: 2, probedAt: 7200000});
@@ -198,12 +221,12 @@
                 saturated: carbon && carbon.saturated,
                 carbonQuota: carbon && carbon.quota,
                 untouchedOrder: untouched.models.map(m => m.modelId)}));")]
-    (is (= ["ag/claude-sonnet-4-6" "ali/qwen3.8-max-0902" "ag/gemini-4-carbon"] (:order res))
+    (is (= ["cx/gpt-6.1-terra" "grok/grok-4.7" "ag/gemini-4-carbon"] (:order res))
         "a saturated score-60 carbon demotes below available models: seller quota gates the head slot, it is not a tie-break")
     (is (true? (:saturated res)) "the demoted member is labeled saturated")
     (is (= {:status "quota" :sellersTotal 2221 :sellersOut 2215 :ms 412} (:carbonQuota res))
         "the live 429's seller evidence (N of M out of quota) rides on the member")
-    (is (= ["ag/gemini-4-carbon" "ag/claude-sonnet-4-6" "ali/qwen3.8-max-0902"] (:untouchedOrder res))
+    (is (= ["ag/gemini-4-carbon" "cx/gpt-6.1-terra" "grok/grok-4.7"] (:untouchedOrder res))
         "quota data that is absent or malformed is a no-op, never a demotion")))
 
 (deftest quota-probe-classifies-live-refusals-with-seller-evidence
@@ -218,8 +241,8 @@
                   async run() { writes.push({sql, args}); }
                 }; }}; }};
                 const env = {ROUTING_DB: db, INFERHUB_API_KEY: 'k', INFERHUB_BASE_URL: 'https://example.test/v1'};
-                const members = [{modelId: 'ag/gemini-4-carbon'}, {modelId: 'ag/claude-sonnet-4-6'},
-                  {modelId: 'ali/qwen3.8-max-0902'}, {modelId: 'cx/gpt-6-astra'}];
+                const members = [{modelId: 'ag/gemini-4-carbon'}, {modelId: 'cx/gpt-6.1-terra'},
+                  {modelId: 'grok/grok-4.7'}, {modelId: 'cx/gpt-6-astra'}];
                 const bodies = [];
                 const fetchFn = async (url, opts) => {
                   const body = JSON.parse(opts.body);
@@ -227,7 +250,7 @@
                   if (body.model === 'ag/gemini-4-carbon')
                     return new Response(JSON.stringify({error: {code: 'capacity_saturated',
                       message: '2,215 of 2,221 sellers out of quota or cooling down'}}), {status: 429});
-                  if (body.model === 'ag/claude-sonnet-4-6')
+                  if (body.model === 'cx/gpt-6.1-terra')
                     return new Response(JSON.stringify({error: {code: 'model_disabled',
                       message: 'model disabled in your preferences'}}), {status: 403});
                   if (body.model === 'cx/gpt-6-astra')
@@ -245,12 +268,12 @@
                   persistedResults: persisted && slim(persisted.results), persistedHour: persisted && persisted.hour}));}")]
     (is (true? (:exported res)) "probeQuotaHealth is exported from auto.js")
     (is (= {:ag/gemini-4-carbon {:status "quota" :sellersTotal 2221 :sellersOut 2215}
-            :ag/claude-sonnet-4-6 {:status "refused"}
-            :ali/qwen3.8-max-0902 {:status "ok"}
+            :cx/gpt-6.1-terra {:status "refused"}
+            :grok/grok-4.7 {:status "ok"}
             :cx/gpt-6-astra {:status "unknown"}}
            (:results res))
         "a 429 parses to quota with seller evidence, a 403 to refused, a 200 to ok, anything else stays unknown")
-    (is (= ["ag/gemini-4-carbon" "ag/claude-sonnet-4-6" "ali/qwen3.8-max-0902" "cx/gpt-6-astra"] (:probed res))
+    (is (= ["ag/gemini-4-carbon" "cx/gpt-6.1-terra" "grok/grok-4.7" "cx/gpt-6-astra"] (:probed res))
         "every member is probed sequentially")
     (is (true? (:bid res)) "probes carry the output bid header: measurement can never overspend")
     (is (true? (:tokens res)) "probes are tiny: max_tokens 8")

@@ -7,7 +7,7 @@
 import { resolveVirtualModel, getModelMetadata, CASCADE_CHAINS, CEILING_EXEMPT_MODELS } from "./catalog.js";
 import { getQuotesForModel, calculateSavingsPct } from "./pricing.js";
 import { getProviderStats, isCircuitOpen } from "./metrics.js";
-import { AUTO_MODEL, AUTO_OUTPUT_BID } from "./auto.js";
+import { AUTO_MODEL, AUTO_OUTPUT_BID, isAutoEligibleModel } from "./auto.js";
 
 export const DEFAULT_WEIGHTS = {
   price: 0.5,
@@ -27,8 +27,8 @@ const CACHE_AFFINITY_BONUS = 0.25;
 // Tier-0 ceiling raised $0.10 -> $0.50 (bk-dba7, data-driven). Ledger evidence:
 // 51k rows, escalation rungs 0.20/0.30 NEVER fired (avg_esc=0) — chains degrade
 // by model-fallback, not tier-escalation, so mid rungs were dead weight. Market
-// evidence: normal-weather min asks are ali/glm-5.3 $0.044, zai/glm-5.3 $0.0044,
-// terra $0.12 (over the old ceiling!), qwen3.8-max $0.042 — $0.10 kept eating
+// evidence: normal-weather min asks are ali/glm-5.3 $0.044 and terra $0.12;
+// terra $0.12 (over the old ceiling!), retired models no longer enter the comparison — $0.10 kept eating
 // real heads during ordinary blinks. Ranking is cheapest-first, so a higher
 // tier-0 changes WHO IS ELIGIBLE, not what anything costs in normal weather.
 // Deliberately EXCLUDED: kimi-k3 storm asks ($0.525+) — above kimi's own $0.30
@@ -228,6 +228,7 @@ export function rankCandidates({
     const bid = maxFallbackPrice === null ? AUTO_OUTPUT_BID : Math.min(AUTO_OUTPUT_BID, maxFallbackPrice);
     if (!Number.isFinite(bid) || bid < 0) return [];
     return (autoSnapshot?.models || []).filter(m =>
+      isAutoEligibleModel(m?.modelId) &&
       Number.isFinite(m.completion) && m.completion >= 0 && m.completion <= bid
     ).map((m, i) => {
       const providerId = "inferhub-auto";
