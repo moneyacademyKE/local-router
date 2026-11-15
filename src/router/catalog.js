@@ -65,7 +65,6 @@ export const OFFICIAL_PRICES = {
 // sellers — the chain's cheapest enabled member; price ranking does the rest.
 export const GLM_BUDGET_FALLBACK_CHAIN = [
   "ali/glm-5.3",
-  "zai/glm-5.3",
   "grok/grok-4.7",
   "ali/kimi-k3.1-pro",
   "cx/gpt-6.1-terra",

@@ -27,7 +27,7 @@
       (is (> (count (:autoModels res)) 0))
       ;; sol removed 2026-09-05; flash/terra-5.6/kimi-k3 excised 2026-11-09
       ;; (owner directives). ali/glm-5.3 leads; qwen-0902 is the tail.
-      (is (= ["ali/glm-5.3", "zai/glm-5.3", "grok/grok-4.7", "ali/kimi-k3.1-pro", "cx/gpt-6.1-terra", "ali/qwen3.8-max-0902"]
+      (is (= ["ali/glm-5.3", "grok/grok-4.7", "ali/kimi-k3.1-pro", "cx/gpt-6.1-terra", "ali/qwen3.8-max-0902"]
              (:cascadeModels res)))
       (is (not-any? #(= "cx/gpt-5.6-sol" %) (:solExact res))
           "removed sol must resolve to a sol-free fallback, never to itself"))))
@@ -69,7 +69,7 @@
                   cascadeLookup: Boolean(CASCADE_CHAINS['infered/glm-budget']),
                   solBudgetStillReroutes: resolveVirtualModel('infered/sol-budget')
                 }));")]
-      (is (= ["ali/glm-5.3", "zai/glm-5.3", "grok/grok-4.7", "ali/kimi-k3.1-pro", "cx/gpt-6.1-terra", "ali/qwen3.8-max-0902"]
+      (is (= ["ali/glm-5.3", "grok/grok-4.7", "ali/kimi-k3.1-pro", "cx/gpt-6.1-terra", "ali/qwen3.8-max-0902"]
              (:glmBudgetModels res)))
       (is (not-any? #(= "cx/gpt-5.6-sol" %) (:glmBudgetModels res))
           "glm-budget must never include sol")
@@ -79,7 +79,7 @@
       (is (:cascadeLookup res) "must be a registered cascade chain")
       ;; slimmed 2026-09-05: sol names left the listing but old callers still
       ;; reroute to the glm-budget chain instead of erroring
-      (is (= ["ali/glm-5.3", "zai/glm-5.3", "grok/grok-4.7", "ali/kimi-k3.1-pro", "cx/gpt-6.1-terra", "ali/qwen3.8-max-0902"]
+      (is (= ["ali/glm-5.3", "grok/grok-4.7", "ali/kimi-k3.1-pro", "cx/gpt-6.1-terra", "ali/qwen3.8-max-0902"]
              (:solBudgetStillReroutes res))
           "legacy sol-budget callers reroute to the glm-budget chain (flash-free since 2026-11-09)"))))
 
@@ -118,7 +118,7 @@
                   chainMemberDirect: resolveVirtualModel('cx/gpt-6.1-terra')
                 }));")]
       ;; bind-order note: the default chain is glm-budget's five-model cascade
-      (is (= ["ali/glm-5.3" "zai/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra" "ali/qwen3.8-max-0902"]
+      (is (= ["ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra" "ali/qwen3.8-max-0902"]
              (:gm53Typo res))
           "the famous gm5.3 typo must land on the budget chain")
       (is (not-any? #(= "cx/gpt-5.6-sol" %) (:rawSol res))
@@ -127,13 +127,13 @@
           "removed pinned virtuals reroute to the budget chain")
       (is (= ["cx/gpt-6.1-terra"] (:chainMemberDirect res))
           "current chain members stay directly addressable (they are the chains)")
-      (is (= ["ali/glm-5.3" "zai/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra" "ali/qwen3.8-max-0902"]
+      (is (= ["ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra" "ali/qwen3.8-max-0902"]
              (:removedFlash res))
           "excised flash falls to the default chain (never 403-chases the dead pool)")
-      (is (= ["ali/glm-5.3" "zai/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra" "ali/qwen3.8-max-0902"]
+      (is (= ["ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra" "ali/qwen3.8-max-0902"]
              (:removedTerra res))
           "excised terra-5.6 falls to the default chain")
-      (is (= ["ali/glm-5.3" "zai/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra" "ali/qwen3.8-max-0902"]
+      (is (= ["ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra" "ali/qwen3.8-max-0902"]
              (:removedKimi res))
           "excised kimi-k3 falls to the default chain"))))
 
@@ -191,7 +191,7 @@
                 }));")]
       (is (not (:hasTier res)) "unsuffixed qwen must not be registered for raw resolution")
       (is (not (:hasPrice res)) "no official price entry — excised, not dormant")
-      (is (= ["ali/glm-5.3" "zai/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra" "ali/qwen3.8-max-0902"]
+      (is (= ["ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra" "ali/qwen3.8-max-0902"]
              (:resolved res))
           "excised names fall to the default budget chain (Sol precedent), never 403-chase the dead pool")
       (is (= 1 (get-in res [:price :prompt]))
@@ -255,7 +255,7 @@
                 }));")]
       (is (some #{"grok/grok-4.7"} (:glmBudget res))
           "grok-4.7 is a glm-budget chain member (owner directive 2026-11-11)")
-      (is (= 6 (count (:glmBudget res))) "glm-budget is a six-model cascade now")
+      (is (= 5 (count (:glmBudget res))) "glm-budget is a five-model cascade now")
       (is (= {:prompt 2 :completion 6} (:grokPrice res))
           "grok official list 2/6 per the live feed")
       (is (= {:prompt 3 :completion 15} (:sonnetPrice res))
