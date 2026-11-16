@@ -12,7 +12,7 @@ mkdir -p "$LOG_DIR"
 HAS_LEDGER=false
 for db in "$PERSIST_DIR"/v3/d1/miniflare-D1DatabaseObject/*.sqlite; do
   case "$db" in */metadata.sqlite) continue ;; esac
-  if [ -f "$db" ] && [ "$(sqlite3 -readonly "$db" "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='routing_decisions'" 2>/dev/null || :)" = 1 ]; then
+  if [ -f "$db" ] && [ "$(sqlite3 "$db" "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='routing_decisions'" 2>/dev/null || :)" = 1 ]; then
     HAS_LEDGER=true
     break
   fi

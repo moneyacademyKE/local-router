@@ -60,6 +60,18 @@
         (is (str/includes? (slurp (str dir "/state/dev-server.log"))
                            "refusing to create an empty ledger"))))))
 
+(deftest startup-recognizes-a-checkpointed-wal-ledger
+  (fs/with-temp-dir [dir {}]
+    (let [databases (fs/create-dirs (fs/path dir "state/wrangler-state/v3/d1/miniflare-D1DatabaseObject"))
+          db (str (fs/path databases "router.sqlite"))
+          missing-root (str (fs/path dir "missing-root"))]
+      (is (zero? (:exit (sh "sqlite3" db "PRAGMA journal_mode=WAL; CREATE TABLE routing_decisions (id INTEGER);"))))
+      (let [{:keys [exit err]} (sh "/bin/sh" "scripts/local-router-start.sh"
+                                   :env {"HOME" (str dir) "INFERED_ROOT" missing-root
+                                         "INFERED_STATE_ROOT" (str dir "/state")})]
+        (is (not (zero? exit)))
+        (is (str/includes? err "missing-root") "passed the ledger check and attempted to enter the checkout")))))
+
 (deftest watchdog-cli-only-restarts-after-bounded-failures
   (fs/with-temp-dir [dir {}]
     (let [bin (fs/create-dir (fs/path dir "bin"))
