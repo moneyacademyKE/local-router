@@ -42,7 +42,7 @@ export function buildTelemetryHeaders({ served, result }) {
 
 /**
  * Durable decision record — one row per request into D1.
- * Observability must never break routing: every failure is silently caught.
+ * Observability must never break routing; write failures are logged.
  */
 export async function recordRoutingAnalytics(env, rec) {
   try {
@@ -57,7 +57,7 @@ export async function recordRoutingAnalytics(env, rec) {
     ).bind(
       rec.sessionId ?? null,
       rec.requestedModel ?? rec.model ?? null,
-      rec.model ?? null,
+      rec.model ?? (rec.ok ? null : "unserved"),
       rec.provider ?? null,
       rec.escalationLevel ?? 0,
       rec.attempts ?? 1,
