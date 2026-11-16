@@ -11,15 +11,16 @@ const TOP_MODELS_SQL = `
          CAST(AVG(latency_ms) AS INT) AS avgMs,
          ROUND(AVG(attempts), 2) AS avgAttempts
   FROM routing_decisions
+  WHERE selected_model <> 'unserved'
   GROUP BY selected_model
   ORDER BY reqs DESC
   LIMIT 8`;
 
 const SWITCHING_SQL = `
   SELECT COUNT(*) AS total,
-         SUM(CASE WHEN attempts = 1 THEN 1 ELSE 0 END) AS directHits,
-         SUM(CASE WHEN attempts > 1 THEN 1 ELSE 0 END) AS failovers,
-         SUM(CASE WHEN attempts = 0 THEN 1 ELSE 0 END) AS errors,
+         SUM(CASE WHEN ok = 1 AND attempts = 1 THEN 1 ELSE 0 END) AS directHits,
+         SUM(CASE WHEN ok = 1 AND attempts > 1 THEN 1 ELSE 0 END) AS failovers,
+         SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS errors,
          SUM(CASE WHEN escalation_level > 0 THEN 1 ELSE 0 END) AS escalations,
          ROUND(AVG(CASE WHEN attempts > 0 THEN attempts END), 2) AS avgAttempts
   FROM routing_decisions`;
@@ -27,7 +28,7 @@ const SWITCHING_SQL = `
 const FLAPPING_SQL = `
   SELECT COUNT(*) AS sessions FROM (
     SELECT session_id FROM routing_decisions
-    WHERE session_id IS NOT NULL
+    WHERE session_id IS NOT NULL AND selected_model <> 'unserved'
     GROUP BY session_id
     HAVING COUNT(DISTINCT selected_model) > 1)`;
 

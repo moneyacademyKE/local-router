@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import worker from '../src/worker.js';
+import { collectAnalytics } from '../src/ui/analytics.js';
 
 const db = new DatabaseSync(':memory:');
 for (const file of ['0001_init.sql', '0002_auto_chain.sql', '0003_usage.sql']) {
@@ -10,8 +11,11 @@ const hour = Math.floor(Date.now() / 3600000);
 db.prepare('INSERT INTO auto_chain_snapshot (id, hour, payload) VALUES (?, ?, ?)')
   .run('auto', hour, JSON.stringify({ models: [] }));
 const routingDb = {
+  async batch(statements) {
+    return statements.map(statement => ({ results: db.prepare(statement.sql).all() }));
+  },
   prepare(sql) {
-    return { bind(...values) {
+    return { sql, bind(...values) {
       return {
         first: async () => db.prepare(sql).get(...values) ?? null,
         run: async () => db.prepare(sql).run(...values)
@@ -33,4 +37,12 @@ const response = await worker.fetch(req, { INFERHUB_API_KEY: 'test-key', ROUTING
 });
 await Promise.all(waits);
 const row = db.prepare('SELECT requested_model, selected_model, ok, attempts FROM routing_decisions').get() ?? null;
-console.log(JSON.stringify({ status: response.status, row }));
+db.exec(`UPDATE routing_decisions SET session_id='session-a';
+  INSERT INTO routing_decisions (session_id, selected_model, ok, attempts) VALUES
+    ('session-a', 'test/model', 1, 0),
+    ('session-a', 'test/model', 0, 2),
+    ('session-a', 'test/model', 0, 1),
+    ('session-a', 'test/model', 1, 1),
+    ('session-a', 'test/model', 1, 2);`);
+const analytics = await collectAnalytics(routingDb);
+console.log(JSON.stringify({ status: response.status, row, analytics }));
