@@ -1,0 +1,31 @@
+{
+  "objective": "Harden the local Infered Wrangler runtime and repair failure telemetry",
+  "timestamp": "2026-11-17T02:50:00+03:00",
+  "repository": "~/Desktop/infered",
+  "runtime_checkout": "~/Projects/infered-local",
+  "branch": "main",
+  "implementation_commits": ["51579a1", "51ff709", "801e46b", "9b3e4ff", "4f35324", "3fe1855", "be4b0df"],
+  "issue": "https://github.com/moneyacademyKE/local-router/issues/1",
+  "bankai": ["bk-3060", "bk-3893", "bk-795e"],
+  "files_changed": ["scripts/local-router-start.sh", "scripts/local-router-watchdog.bb", "scripts/local-router-soak.bb", "src/local/watchdog.clj", "src/router/telemetry.js", "src/ui/analytics.js", "test/local_runtime_test.clj", "test/no_candidate_telemetry.js", "test/soak_test.clj", "test/telemetry_test.clj", "test/run_tests.clj", "docs/local-runtime-gap-2026-11-16.md"],
+  "commands_run": [
+    {"command": "PATH=/opt/homebrew/bin:$PATH bb test-all", "exit_code": 0, "result": "23 test namespaces, zero failures and errors"},
+    {"command": "PATH=/opt/homebrew/bin:$PATH bb lint", "exit_code": 0, "result": "passed"},
+    {"command": "/bin/sh -n scripts/local-router-start.sh", "exit_code": 0, "result": "passed"},
+    {"command": "git diff --check local-router/main..HEAD", "exit_code": 0, "result": "passed"},
+    {"command": "curl local health, auto and models endpoints", "exit_code": 0, "result": "HTTP 200 for each"},
+    {"command": "bb scripts/local-router-soak.bb", "exit_code": 0, "result": "stream HTTP 200 with one DONE marker"},
+    {"command": "sqlite3 local D1 PRAGMA integrity_check", "exit_code": 0, "result": "ok"}
+  ],
+  "results": {
+    "wrangler": "4.163.0, running from non-Desktop checkout with explicit persistent state",
+    "d1_copy": "3231 decision rows retained at cutover; integrity ok; original state preserved",
+    "no_candidate_failure": "Live request returned HTTP 400; D1 recorded selected_model=unserved, ok=0, attempts=0",
+    "dashboard": "At verification dashboard failure total matched SQL count where ok=0",
+    "bounded_health_soak": "18 of 18 minute samples healthy; 0 watchdog restarts; p95 49 ms, through 02:44 EAT",
+    "long_soak": "72-hour observation in progress since 2026-11-17 02:26:58 EAT; scheduled review 2026-11-20 02:40 EAT",
+    "post_baseline_outcomes_at_0249_eat": {"successes": 106, "timeouts": 18, "non_retryable_candidate_open": 2}
+  },
+  "residual_risks": ["72-hour soak is not complete", "Observed completion failures are under investigation in bk-795e; root cause is unproven", "The Worker telemetry changes have been applied locally, not deployed to the cloud in this work", "A launchd watchdog cannot observe periods when the Mac is asleep or the scheduler is not running"],
+  "verdict": "PARTIAL"
+}
