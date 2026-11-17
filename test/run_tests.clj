@@ -28,6 +28,7 @@
 (load-file "test/local_runtime_test.clj")
 (load-file "test/telemetry_test.clj")
 (load-file "test/soak_test.clj")
+(load-file "test/latency_test.clj")
 
 (let [catalog-res (run-tests 'catalog-test)
       metrics-res (run-tests 'metrics-test)
@@ -52,16 +53,17 @@
       local-runtime-res (run-tests 'local-runtime-test)
       telemetry-res (run-tests 'telemetry-test)
       soak-res (run-tests 'soak-test)
+      latency-res (run-tests 'latency-test)
       total-fail  (+ (:fail catalog-res) (:fail metrics-res) (:fail pricing-res)
                      (:fail pareto-res) (:fail client-res) (:fail fallback-res) (:fail security-res)
                      (:fail stream-res) (:fail usage-res) (:fail chase-res)
                      (:fail cache-res) (:fail session-res) (:fail swr-res) (:fail worker-res)
-                     (:fail refusal-res) (:fail tool-stream-res) (:fail auto-res) (:fail auto-worker-res) (:fail quota-res) (:fail quota-worker-res) (:fail local-runtime-res) (:fail telemetry-res) (:fail soak-res))
+                     (:fail refusal-res) (:fail tool-stream-res) (:fail auto-res) (:fail auto-worker-res) (:fail quota-res) (:fail quota-worker-res) (:fail local-runtime-res) (:fail telemetry-res) (:fail soak-res) (:fail latency-res))
       total-err   (+ (:error catalog-res) (:error metrics-res) (:error pricing-res)
                      (:error pareto-res) (:error client-res) (:error fallback-res) (:error security-res)
                      (:error stream-res) (:error usage-res) (:error chase-res)
                      (:error cache-res) (:error session-res) (:error swr-res) (:error worker-res)
-                     (:error refusal-res) (:error tool-stream-res) (:error auto-res) (:error auto-worker-res) (:error quota-res) (:error quota-worker-res) (:error local-runtime-res) (:error telemetry-res) (:error soak-res))]
+                     (:error refusal-res) (:error tool-stream-res) (:error auto-res) (:error auto-worker-res) (:error quota-res) (:error quota-worker-res) (:error local-runtime-res) (:error telemetry-res) (:error soak-res) (:error latency-res))]
   (println "\n----------------------------------------------------------")
   (if (and (zero? total-fail) (zero? total-err))
     (do

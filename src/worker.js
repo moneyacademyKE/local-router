@@ -363,6 +363,7 @@ export default {
             ok: false,
             requestedModel,
             attempts: result.attempts || 0,
+            latencyMs: Date.now() - requestStart,
             budgetCap: maxFallbackPrice,
             sessionId,
             error: String(result.failoverErrors?.[0]?.error || result.error || "unknown").slice(0, 200)
@@ -400,9 +401,8 @@ export default {
           provider: metrics.servedProvider || served.providerId,
           escalationLevel: served.escalationLevel ?? 0,
           attempts: metrics.attempts || result.attempts || 1,
-          // Wall-clock fallback: covers any shape where the executor's own
-          // measurement is missing (cache-served, aborted stream flush).
-          latencyMs: metrics.latencyMs || (Date.now() - requestStart),
+          // Wall-clock duration includes every failed attempt and stream drain.
+          latencyMs: Date.now() - requestStart,
           budgetCap: maxFallbackPrice ?? metrics.budgetTier ?? served.budgetTier ?? null,
           sessionId,
           // Token accounting (2026-11-12): streams carry metrics.usage from
