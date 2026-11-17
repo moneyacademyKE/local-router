@@ -23,7 +23,7 @@
                 ]}),{status:200});}
                 const body=JSON.parse(opts.body);
                 sent.push({model:body.model,bid:opts.headers['x-max-output-price'],provider:opts.headers['X-InferHub-Provider']||null});
-                if (body.model==='grok/grok-4.7') return new Response('price moved',{status:402});
+                if (body.model==='oai/gpt-6.1-sol') return new Response('price moved',{status:402});
                 const answer={choices:[{index:0,delta:{content:'safe fallback'},finish_reason:'stop'}]};
                 return new Response('data: '+JSON.stringify(answer)+'\\n\\ndata: [DONE]\\n\\n',
                   {status:200,headers:{'Content-Type':'text/event-stream'}});
@@ -42,18 +42,18 @@
                   supportsCache:m.supportsCache,effectiveInput:m.effectiveInput}))}));")]
     (is (= 200 (:status res)))
     (is (.contains (:body res) "safe fallback"))
-    (is (= ["grok/grok-4.7" "oai/gpt-6.1-sol"] (mapv :model (:sent res)))
+    (is (= ["oai/gpt-6.1-sol" "grok/grok-4.7"] (mapv :model (:sent res)))
         "the leading member fails, so the chain falls to the next under the same bid")
     (is (every? #(= "0.999999" (:bid %)) (:sent res)))
     (is (every? #(nil? (:provider %)) (:sent res)) "synthetic node ids are not sent as real upstream sellers")
     (is (= 1 (:feedCalls res)) "the endpoint reads the shared snapshot")
     (is (= 200 (:inspectStatus res)))
-    (is (= [{:id "grok/grok-4.7" :askCount 2 :inCapDepth 2 :depthPrice 0.04}
-            {:id "oai/gpt-6.1-sol" :askCount 2 :inCapDepth 2 :depthPrice 0.55}]
+    (is (= [{:id "oai/gpt-6.1-sol" :askCount 2 :inCapDepth 2 :depthPrice 0.55}
+            {:id "grok/grok-4.7" :askCount 2 :inCapDepth 2 :depthPrice 0.04}]
            (mapv #(select-keys % [:id :askCount :inCapDepth :depthPrice]) (:snapshot res)))
         "/v1/auto surfaces per-model ask depth: total asks, in-cap sellers, sustained price")
-    (is (= [{:id "grok/grok-4.7" :supportsCache false :effectiveInput 0.01}
-            {:id "oai/gpt-6.1-sol" :supportsCache true :effectiveInput 0.055}]
+    (is (= [{:id "oai/gpt-6.1-sol" :supportsCache true :effectiveInput 0.055}
+            {:id "grok/grok-4.7" :supportsCache false :effectiveInput 0.01}]
            (mapv #(select-keys % [:id :supportsCache :effectiveInput]) (:snapshot res)))
         "/v1/auto surfaces the cache flag and the cache-adjusted input price")))
 

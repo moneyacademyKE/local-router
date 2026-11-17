@@ -3,6 +3,8 @@
  * High-cohesion response formatting, CORS management, and D1 decision persistence.
  */
 
+import { recordAttempts } from "./health.js";
+
 export function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
@@ -74,6 +76,17 @@ export async function recordRoutingAnalytics(env, rec) {
     // Never throw — observability must not break routing — but never be
     // SILENT either: a dead D1 write is ledger blindness (Sep 5-19 proved it).
     console.error("routing-analytics: D1 write failed:", e?.message || e);
+  }
+  // Per-attempt facts (2026-11-18): the decision row names only the LAST
+  // failure, so per-model reliability was unmeasurable. Every attempt gets its
+  // own row here; the value ranking reads them.
+  if (Array.isArray(rec.failoverErrors)) {
+    await recordAttempts(env, {
+      requestedModel: rec.requestedModel ?? rec.model ?? null,
+      failoverErrors: rec.failoverErrors,
+      served: rec.ok && rec.model ? { modelId: rec.model, providerId: rec.provider ?? null } : null,
+      servedLatencyMs: rec.servedLatencyMs ?? null
+    });
   }
 }
 

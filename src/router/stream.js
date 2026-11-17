@@ -304,7 +304,8 @@ export function executeStreamingWithSplice({
           });
           errors.push({
             providerId: candidate.providerId, modelId: candidate.modelId,
-            status: opened.status, error: opened.reason
+            status: opened.status, latencyMs: opened.latencyMs ?? null,
+            error: opened.reason
           });
           if (opened.clientGone) break;
           if (NON_RETRYABLE_OPEN_STATUSES.has(opened.status)) {
@@ -440,6 +441,7 @@ export function executeStreamingWithSplice({
         });
         errors.push({
           providerId: candidate.providerId, modelId: candidate.modelId, status: 502,
+          latencyMs: Date.now() - opened.startTime,
           error: emptyDone ? "empty_completion"
             : candidateDied ? "stream_errored_pre_content" : "stream_ended_pre_content"
         });

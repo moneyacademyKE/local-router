@@ -366,6 +366,7 @@ export default {
             latencyMs: Date.now() - requestStart,
             budgetCap: maxFallbackPrice,
             sessionId,
+            failoverErrors: result.failoverErrors || [],
             error: String(result.failoverErrors?.[0]?.error || result.error || "unknown").slice(0, 200)
           }));
           return jsonResponse({
@@ -410,6 +411,10 @@ export default {
           // result.usage straight from the upstream JSON. Telemetry accepts
           // both shapes — spend is finally measurable from the ledger alone.
           usage: metrics.usage || result.usage || null,
+          // Attempt facts for the value ranking: the failures that got us here
+          // plus the attempt that answered, with the latency the client felt.
+          failoverErrors: result.failoverErrors || metrics.failoverErrors || [],
+          servedLatencyMs: metrics.ttftMs ?? result.latencyMs ?? null,
           ...overrides
         }));
 

@@ -215,6 +215,7 @@ export function executeWithFallback({
           providerId: candidate.providerId,
           modelId: candidate.modelId,
           status: result.status,
+          latencyMs: result.latencyMs ?? null,
           error: result.error
         });
         if (NON_RETRYABLE_OPEN_STATUSES.has(result.status)) {

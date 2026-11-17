@@ -4,6 +4,8 @@
  * is what several sellers can sustain inside the output bid, not what one lone
  * ask advertises. A book with a single in-cap seller is bait — excluded. */
 
+import { loadHealth, applyValueRanking } from "./health.js";
+
 export const AUTO_MODEL = "infered/auto";
 export const AUTO_OUTPUT_BID = 0.999999;
 export const AUTO_HOUR_MS = 60 * 60 * 1000;
@@ -27,21 +29,21 @@ export const CACHE_TOKEN_COST = 0.1;
 // Equal-score listings are ordered by in-cap seller depth (availability), then
 // cache-adjusted blended price (25% effective input + 75% sustained in-cap
 // output) — never by a single seller's cheapest ask.
-// Try order is separate data (owner directive 2026-11-17): `priority` is the
-// routing preference — lower tries first — while `score` keeps meaning what it
-// says, capability. Grok leads on upstream capacity, not intelligence: the
-// 51-57 members stalled ~30s or answered 503 while grok answered in ~3s, so
-// leading with them burned two upstream calls per request before landing here.
+// Try order is MEASURED, not hand-set (owner directive 2026-11-18): the served
+// order comes from applyValueRanking (score × reliability × speed ÷ cost),
+// where reliability and speed are the model's own attempt ledger. A hand-set
+// priority was the previous mechanism and had to be re-edited every time
+// upstream capacity moved — it encoded a belief, not a measurement.
 // 2026-11-11: grok-4.7 joined the pool; Argon remains explicitly excluded.
 export const AUTO_MODELS = [
-  { id: "grok/grok-4.7", score: 35.5, priority: 1 },
-  { id: "ag/gemini-4-carbon", score: 60, priority: 2 },
-  { id: "cx/gpt-6-astra", score: 57, priority: 3 },
-  { id: "oai/gpt-6.1-sol", score: 55, priority: 4 },
-  { id: "cx/gpt-6.1-terra", score: 51, priority: 5 },
-  { id: "oai/gpt-6.1-terra", score: 51, priority: 6 },
-  { id: "ali/kimi-k3.1-pro", score: 46, priority: 7 },
-  { id: "ali/glm-5.3", score: 32, priority: 8 }
+  { id: "grok/grok-4.7", score: 35.5 },
+  { id: "ag/gemini-4-carbon", score: 60 },
+  { id: "cx/gpt-6-astra", score: 57 },
+  { id: "oai/gpt-6.1-sol", score: 55 },
+  { id: "cx/gpt-6.1-terra", score: 51 },
+  { id: "oai/gpt-6.1-terra", score: 51 },
+  { id: "ali/kimi-k3.1-pro", score: 46 },
+  { id: "ali/glm-5.3", score: 32 }
 ];
 
 const AUTO_MODEL_IDS = new Set(AUTO_MODELS.map(model => model.id));
@@ -80,7 +82,7 @@ export function buildAutoSnapshot(feed, now = Date.now()) {
   const entries = new Map(feed.data.map(m => [m.id, m]));
   const models = [];
   const excluded = [];
-  for (const { id, score, priority } of AUTO_MODELS) {
+  for (const { id, score } of AUTO_MODELS) {
     const entry = entries.get(id);
     const pricing = entry?.pricing;
     if (!pricing) { excluded.push({ modelId: id, reason: "not_in_feed" }); continue; }
@@ -107,11 +109,14 @@ export function buildAutoSnapshot(feed, now = Date.now()) {
       : prompt;
     const depthPrice = inCap[inCap.length - 1];
     const effectiveBlended = Number(((0.25 * effectiveInput) + (0.75 * depthPrice)).toFixed(6));
-    models.push({ modelId: id, score, priority, prompt, completion: asks[0],
+    models.push({ modelId: id, score, prompt, completion: asks[0],
       askCount: asks.length, inCapDepth: inCap.length, depthPrice,
       supportsCache, effectiveInput, effectiveBlended });
   }
-  models.sort((a, b) => a.priority - b.priority || b.score - a.score ||
+  // Build-time order is capability-led; the served order is the measured value
+  // order applied by applyValueRanking (see ./health.js). Keeping this sort
+  // deterministic means a cold D1 still serves a sensible chain.
+  models.sort((a, b) => b.score - a.score ||
     b.inCapDepth - a.inCapDepth || a.effectiveBlended - b.effectiveBlended ||
     a.modelId.localeCompare(b.modelId));
   const hour = Math.floor(now / AUTO_HOUR_MS);
@@ -225,6 +230,16 @@ async function withQuotaHealth(snapshot, db, hour) {
   return snapshot;
 }
 
+/** Applies the measured value order: intelligence × reliability × speed ÷ cost.
+ * Health older than the heartbeat is re-aggregated by loadHealth; a D1 read
+ * failure degrades to the capability-led build order, never to a dead chain. */
+async function withValueOrder(snapshot, db, now) {
+  try {
+    const health = await loadHealth(db, now);
+    return health ? applyValueRanking(snapshot, health) : snapshot;
+  } catch { return snapshot; }
+}
+
 /**
  * Serves the current hour's D1 snapshot; the first call after each boundary
  * refreshes it from the live feed. A failed refresh serves the last live
@@ -232,13 +247,19 @@ async function withQuotaHealth(snapshot, db, hour) {
  * output bid still enforces the ceiling, so staleness only ages the
  * ordering, never the limit. No snapshot at all fails closed. Never falls
  * back to seeded or official prices.
+ *
+ * Ordering layers, innermost first: the build (capability), the measured
+ * value order (reliability/speed/cost), and quota health last — a member whose
+ * sellers are out of quota is demoted regardless of how good its value is.
  */
 export async function getAutoSnapshot(env, fetchFn = fetch, now = Date.now()) {
   const db = env?.ROUTING_DB;
   if (!db || !env?.INFERHUB_API_KEY) throw new Error("Auto chain needs D1 and a live market key");
   const hour = Math.floor(now / AUTO_HOUR_MS);
+  const serve = async (row) => withQuotaHealth(
+    await withValueOrder(withStaleness(row, hour), db, now), db, hour);
   let row = await readSnapshot(db);
-  if (row && Number(row.hour) === hour) return withQuotaHealth(withStaleness(row, hour), db, hour);
+  if (row && Number(row.hour) === hour) return serve(row);
 
   const baseUrl = env.INFERHUB_BASE_URL || "https://api.inferhub.dev/v1";
   try {
@@ -255,8 +276,8 @@ export async function getAutoSnapshot(env, fetchFn = fetch, now = Date.now()) {
     row = await readSnapshot(db);
   } catch (refreshError) {
     if (!row) throw refreshError;
-    return withQuotaHealth(withStaleness(row, hour), db, hour);
+    return serve(row);
   }
   if (!row) throw new Error("Auto snapshot is unavailable for this hour");
-  return withQuotaHealth(withStaleness(row, hour), db, hour);
+  return serve(row);
 }
