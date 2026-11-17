@@ -8,7 +8,7 @@
     (if (zero? exit) (json/parse-string out true)
         (throw (ex-info (str "Node eval error: " err) {:out out})))))
 
-(deftest auto-selection-is-intelligence-ranked-and-exclusive
+(deftest auto-selection-is-priority-ranked-and-exclusive
   (let [res (run-node-eval
              "import { buildAutoSnapshot } from './src/router/auto.js';
               const model = (id, asks) => ({id, pricing: {asks_in: asks.map(x => x/5), asks_out: asks}});
@@ -25,10 +25,10 @@
               console.log(JSON.stringify(snapshot));")]
     (is (= 2 (:hour res)))
     (is (= 10800000 (:nextRefreshAt res)))
-    (is (= ["oai/gpt-6.1-sol" "cx/gpt-6.1-terra" "ali/kimi-k3.1-pro"
-            "grok/grok-4.7" "ali/glm-5.3"]
+    (is (= ["grok/grok-4.7" "oai/gpt-6.1-sol" "cx/gpt-6.1-terra"
+            "ali/kimi-k3.1-pro" "ali/glm-5.3"]
            (mapv :modelId (:models res)))
-        "only the surviving auto roster is ranked")
+        "the owner's try order leads; the surviving roster keeps its capability scores")
     (is (every? #(< (:completion %) 1) (:models res)))
     (is (= {:askCount 3 :inCapDepth 3 :depthPrice 0.09}
            (select-keys (first (filter #(= "ali/glm-5.3" (:modelId %)) (:models res)))
@@ -221,12 +221,12 @@
                 saturated: carbon && carbon.saturated,
                 carbonQuota: carbon && carbon.quota,
                 untouchedOrder: untouched.models.map(m => m.modelId)}));")]
-    (is (= ["cx/gpt-6.1-terra" "grok/grok-4.7" "ag/gemini-4-carbon"] (:order res))
-        "a saturated score-60 carbon demotes below available models: seller quota gates the head slot, it is not a tie-break")
+    (is (= ["grok/grok-4.7" "cx/gpt-6.1-terra" "ag/gemini-4-carbon"] (:order res))
+        "a saturated carbon demotes below every available member: seller quota gates the head slot, it is not a tie-break")
     (is (true? (:saturated res)) "the demoted member is labeled saturated")
     (is (= {:status "quota" :sellersTotal 2221 :sellersOut 2215 :ms 412} (:carbonQuota res))
         "the live 429's seller evidence (N of M out of quota) rides on the member")
-    (is (= ["ag/gemini-4-carbon" "cx/gpt-6.1-terra" "grok/grok-4.7"] (:untouchedOrder res))
+    (is (= ["grok/grok-4.7" "ag/gemini-4-carbon" "cx/gpt-6.1-terra"] (:untouchedOrder res))
         "quota data that is absent or malformed is a no-op, never a demotion")))
 
 (deftest quota-probe-classifies-live-refusals-with-seller-evidence

@@ -27,16 +27,21 @@ export const CACHE_TOKEN_COST = 0.1;
 // Equal-score listings are ordered by in-cap seller depth (availability), then
 // cache-adjusted blended price (25% effective input + 75% sustained in-cap
 // output) — never by a single seller's cheapest ask.
+// Try order is separate data (owner directive 2026-11-17): `priority` is the
+// routing preference — lower tries first — while `score` keeps meaning what it
+// says, capability. Grok leads on upstream capacity, not intelligence: the
+// 51-57 members stalled ~30s or answered 503 while grok answered in ~3s, so
+// leading with them burned two upstream calls per request before landing here.
 // 2026-11-11: grok-4.7 joined the pool; Argon remains explicitly excluded.
 export const AUTO_MODELS = [
-  { id: "ag/gemini-4-carbon", score: 60 },
-  { id: "cx/gpt-6-astra", score: 57 },
-  { id: "oai/gpt-6.1-sol", score: 55 },
-  { id: "cx/gpt-6.1-terra", score: 51 },
-  { id: "oai/gpt-6.1-terra", score: 51 },
-  { id: "ali/kimi-k3.1-pro", score: 46 },
-  { id: "grok/grok-4.7", score: 35.5 },
-  { id: "ali/glm-5.3", score: 32 }
+  { id: "grok/grok-4.7", score: 35.5, priority: 1 },
+  { id: "ag/gemini-4-carbon", score: 60, priority: 2 },
+  { id: "cx/gpt-6-astra", score: 57, priority: 3 },
+  { id: "oai/gpt-6.1-sol", score: 55, priority: 4 },
+  { id: "cx/gpt-6.1-terra", score: 51, priority: 5 },
+  { id: "oai/gpt-6.1-terra", score: 51, priority: 6 },
+  { id: "ali/kimi-k3.1-pro", score: 46, priority: 7 },
+  { id: "ali/glm-5.3", score: 32, priority: 8 }
 ];
 
 const AUTO_MODEL_IDS = new Set(AUTO_MODELS.map(model => model.id));
@@ -75,7 +80,7 @@ export function buildAutoSnapshot(feed, now = Date.now()) {
   const entries = new Map(feed.data.map(m => [m.id, m]));
   const models = [];
   const excluded = [];
-  for (const { id, score } of AUTO_MODELS) {
+  for (const { id, score, priority } of AUTO_MODELS) {
     const entry = entries.get(id);
     const pricing = entry?.pricing;
     if (!pricing) { excluded.push({ modelId: id, reason: "not_in_feed" }); continue; }
@@ -102,12 +107,13 @@ export function buildAutoSnapshot(feed, now = Date.now()) {
       : prompt;
     const depthPrice = inCap[inCap.length - 1];
     const effectiveBlended = Number(((0.25 * effectiveInput) + (0.75 * depthPrice)).toFixed(6));
-    models.push({ modelId: id, score, prompt, completion: asks[0],
+    models.push({ modelId: id, score, priority, prompt, completion: asks[0],
       askCount: asks.length, inCapDepth: inCap.length, depthPrice,
       supportsCache, effectiveInput, effectiveBlended });
   }
-  models.sort((a, b) => b.score - a.score || b.inCapDepth - a.inCapDepth ||
-    a.effectiveBlended - b.effectiveBlended || a.modelId.localeCompare(b.modelId));
+  models.sort((a, b) => a.priority - b.priority || b.score - a.score ||
+    b.inCapDepth - a.inCapDepth || a.effectiveBlended - b.effectiveBlended ||
+    a.modelId.localeCompare(b.modelId));
   const hour = Math.floor(now / AUTO_HOUR_MS);
   return { hour, refreshedAt: now, nextRefreshAt: (hour + 1) * AUTO_HOUR_MS,
     cache: { hitRate: CACHE_HIT_RATE, tokenCost: CACHE_TOKEN_COST,

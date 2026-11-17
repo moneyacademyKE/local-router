@@ -23,7 +23,7 @@
                 ]}),{status:200});}
                 const body=JSON.parse(opts.body);
                 sent.push({model:body.model,bid:opts.headers['x-max-output-price'],provider:opts.headers['X-InferHub-Provider']||null});
-                if (body.model==='oai/gpt-6.1-sol') return new Response('price moved',{status:402});
+                if (body.model==='grok/grok-4.7') return new Response('price moved',{status:402});
                 const answer={choices:[{index:0,delta:{content:'safe fallback'},finish_reason:'stop'}]};
                 return new Response('data: '+JSON.stringify(answer)+'\\n\\ndata: [DONE]\\n\\n',
                   {status:200,headers:{'Content-Type':'text/event-stream'}});
@@ -42,17 +42,18 @@
                   supportsCache:m.supportsCache,effectiveInput:m.effectiveInput}))}));")]
     (is (= 200 (:status res)))
     (is (.contains (:body res) "safe fallback"))
-    (is (= ["oai/gpt-6.1-sol" "grok/grok-4.7"] (mapv :model (:sent res))))
+    (is (= ["grok/grok-4.7" "oai/gpt-6.1-sol"] (mapv :model (:sent res)))
+        "the leading member fails, so the chain falls to the next under the same bid")
     (is (every? #(= "0.999999" (:bid %)) (:sent res)))
     (is (every? #(nil? (:provider %)) (:sent res)) "synthetic node ids are not sent as real upstream sellers")
     (is (= 1 (:feedCalls res)) "the endpoint reads the shared snapshot")
     (is (= 200 (:inspectStatus res)))
-    (is (= [{:id "oai/gpt-6.1-sol" :askCount 2 :inCapDepth 2 :depthPrice 0.55}
-            {:id "grok/grok-4.7" :askCount 2 :inCapDepth 2 :depthPrice 0.04}]
+    (is (= [{:id "grok/grok-4.7" :askCount 2 :inCapDepth 2 :depthPrice 0.04}
+            {:id "oai/gpt-6.1-sol" :askCount 2 :inCapDepth 2 :depthPrice 0.55}]
            (mapv #(select-keys % [:id :askCount :inCapDepth :depthPrice]) (:snapshot res)))
         "/v1/auto surfaces per-model ask depth: total asks, in-cap sellers, sustained price")
-    (is (= [{:id "oai/gpt-6.1-sol" :supportsCache true :effectiveInput 0.055}
-            {:id "grok/grok-4.7" :supportsCache false :effectiveInput 0.01}]
+    (is (= [{:id "grok/grok-4.7" :supportsCache false :effectiveInput 0.01}
+            {:id "oai/gpt-6.1-sol" :supportsCache true :effectiveInput 0.055}]
            (mapv #(select-keys % [:id :supportsCache :effectiveInput]) (:snapshot res)))
         "/v1/auto surfaces the cache flag and the cache-adjusted input price")))
 
@@ -115,7 +116,7 @@
               ]}, Date.now());
               const marketRow = {hour, payload: JSON.stringify(market)};
               const quotaRow = {hour, payload: JSON.stringify({hour, probedAt: Date.now(), results: {
-                'ag/gemini-4-carbon': {status: 'quota', sellersTotal: 2221, sellersOut: 2215, ms: 412},
+                'grok/grok-4.7': {status: 'quota', sellersTotal: 2221, sellersOut: 2215, ms: 412},
                 'cx/gpt-6.1-terra': {status: 'ok', ms: 890}
               }})};
               const db={prepare(sql) {return {bind(...args) {return {
@@ -139,19 +140,19 @@
               const body=await response.text();
               const inspect=await worker.fetch(new Request('https://worker.test/v1/auto'),env,{waitUntil(){}});
               const snapshot=await inspect.json();
-              const carbon=snapshot.models.filter(m=>m.modelId==='ag/gemini-4-carbon')[0]||null;
+              const grok=snapshot.models.filter(m=>m.modelId==='grok/grok-4.7')[0]||null;
               console.log(JSON.stringify({status:response.status,body,sent,
                 order:snapshot.models.map(m=>m.modelId),
-                carbonSaturated:carbon && carbon.saturated,
-                carbonQuota:carbon && carbon.quota,
+                grokSaturated:grok && grok.saturated,
+                grokQuota:grok && grok.quota,
                 stale:snapshot.stale}));")]
     (is (= 200 (:status res)))
     (is (.contains (:body res) "quota-aware serve"))
-    (is (= ["cx/gpt-6.1-terra"] (mapv :model (:sent res)))
-        "the saturated carbon head is demoted below available members: the request never even tries it")
+    (is (= ["ag/gemini-4-carbon"] (mapv :model (:sent res)))
+        "the saturated grok head is demoted below available members: the request never even tries it")
     (is (every? #(= "0.999999" (:bid %)) (:sent res)))
-    (is (= ["cx/gpt-6.1-terra" "grok/grok-4.7" "ag/gemini-4-carbon"] (:order res))
-        "/v1/auto shows the quota-demoted order with carbon last")
-    (is (true? (:carbonSaturated res)))
-    (is (= {:status "quota" :sellersTotal 2221 :sellersOut 2215 :ms 412} (:carbonQuota res)))
+    (is (= ["ag/gemini-4-carbon" "cx/gpt-6.1-terra" "grok/grok-4.7"] (:order res))
+        "/v1/auto shows the quota-demoted order with the saturated grok last")
+    (is (true? (:grokSaturated res)))
+    (is (= {:status "quota" :sellersTotal 2221 :sellersOut 2215 :ms 412} (:grokQuota res)))
     (is (false? (:stale res)))))
