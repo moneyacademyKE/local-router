@@ -54,12 +54,20 @@ export async function recordRoutingAnalytics(env, rec) {
     // cache hits send the upstream OpenAI shape {prompt_tokens,...}).
     const u = (rec.usage && typeof rec.usage === "object") ? rec.usage : null;
     const fin = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+    // A success with no model is a contract gap, not a normal case. The old
+    // bind wrote NULL here and D1 rejected the whole row, so 77 decisions
+    // vanished from the ledger (dev-server.log, Nov 2026) — exactly the
+    // blindness telemetry exists to prevent. A visible sentinel beats a
+    // missing row, and the warning names the gap.
+    if (rec.ok && !rec.model) {
+      console.warn("routing-analytics: ok decision carried no model — recording 'unspecified'");
+    }
     await env.ROUTING_DB.prepare(
       "INSERT INTO routing_decisions (session_id, requested_model, selected_model, selected_provider, escalation_level, attempts, latency_ms, budget_cap, ok, error, prompt_tokens, completion_tokens, cached_tokens, cost_usd) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)"
     ).bind(
       rec.sessionId ?? null,
       rec.requestedModel ?? rec.model ?? null,
-      rec.model ?? (rec.ok ? null : "unserved"),
+      rec.model ?? (rec.ok ? "unspecified" : "unserved"),
       rec.provider ?? null,
       rec.escalationLevel ?? 0,
       rec.attempts ?? 1,

@@ -18,3 +18,13 @@
         (is (= 1 (get-in analytics [:switching :failovers])) "failed retries are not absorbed failovers")
         (is (= 0 (:flappingSessions analytics)) "unserved is not a model switch")
         (is (= ["test/model"] (mapv :model (:topModels analytics))) "unserved is not a performing model")))))
+
+(deftest ok-decision-without-a-model-still-lands-in-the-ledger
+  (let [{:keys [exit out err]} (sh "node" "test/unspecified_model_telemetry.js")]
+    (is (zero? exit) err)
+    (when (zero? exit)
+      (let [{:keys [row]} (json/parse-string out true)]
+        (is (some? row) "the decision row must survive — a NULL model used to reject it outright")
+        (is (= "unspecified" (:selected_model row)) "an unattributed success is named, not silently dropped")
+        (is (= 1 (:ok row)))
+        (is (= "infered/auto" (:requested_model row)))))))
