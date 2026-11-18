@@ -29,6 +29,7 @@
  */
 
 import { recordSample, recordUsage } from "./metrics.js";
+import { classifyExhaustion } from "./exhaustion.js";
 import { takeCompleteSseFrames, windowHasCompletionToken, jsonCompletionToSseStream } from "./sse.js";
 import { createQuotaFrameGate } from "./quota.js";
 import { streamUsage, finalizeUsage, USAGE_NEEDLE } from "./usage.js";
@@ -189,13 +190,10 @@ export function executeStreamingWithSplice({
   let attemptsUsed = 0;
   let budgetCut = false;
   let nonRetryableOpen = false;
-  // Model-level refusal poisoning: a 4xx open (403 model_disabled etc.) is an
-  // ACCOUNT-level verdict, not a node-level flake — every remaining node of
-  // that model refuses identically. The `break` that used to live here killed
-  // the WHOLE candidate loop, so one disabled head model 503'd the request
-  // instead of cascading to the next chain member (live 2026-11-09: 4 of 7
-  // models disabled account-side; terra-kimi died in 0.4s, kimi-glm never
-  // reached its retired market tail). Skip the model, keep the chain alive.
+  // Model-level refusal poisoning: a 4xx open (403 model_disabled) is an
+  // ACCOUNT-level verdict, so every node of that model refuses identically —
+  // skip the model, keep the chain alive (live 2026-11-09: a disabled head
+  // model 503'd the request instead of cascading to the next chain member).
   const refusedModels = new Set();
   let contentSeen = false;
   let doneSeen = false;
@@ -285,24 +283,28 @@ export function executeStreamingWithSplice({
         // Already-refused model: every one of its nodes answers the same 4xx.
         // Skip without burning an attempt — later chain members need that budget.
         if (refusedModels.has(candidate.modelId)) continue;
-        // Bound the SILENT chase: until the first relayed byte the client
-        // stares at nothing. A model whose every node fails slowly must not
-        // burn maxAttempts x per-open latency before answering — 30s covers
-        // the slowest healthy open observed (24s TTFB) plus one splice.
-        if (!firstCommitAt && Date.now() - startedAt > preCommitBudgetMs) {
+        // Bound the SILENT chase, and bound the attempt it authorizes too: an
+        // unclamped per-attempt timeout let two 25s attempts run 50.8s under a
+        // 30s budget and still answer 503 (live 2026-11-18, infered/auto).
+        const remainingBudgetMs = preCommitBudgetMs - (Date.now() - startedAt);
+        if (!firstCommitAt && remainingBudgetMs <= 0) {
           budgetCut = true;
           break;
         }
         attemptsUsed++;
+        // After the first commit the budget no longer applies — the client is
+        // already reading content, and clamping there would cut a live answer.
+        const attemptTimeoutMs = firstCommitAt ? timeoutMs : Math.min(timeoutMs, remainingBudgetMs);
+        const attemptFirstByteMs = Math.min(firstByteTimeoutMs, attemptTimeoutMs);
 
         // A 400 naming a field is a body verdict: repair once, then judge.
-        const openAttempt = (b) => openUpstreamStream({ candidate, requestBody: b, apiKey, fetchFn, baseUrl, timeoutMs, firstByteTimeoutMs, requestSignal });
+        const openAttempt = (b) => openUpstreamStream({ candidate, requestBody: b, apiKey, fetchFn, baseUrl, timeoutMs: attemptTimeoutMs, firstByteTimeoutMs: attemptFirstByteMs, requestSignal });
         let opened = await openAttempt(requestBody);
         const repairedBody = opened.ok || opened.clientGone ? null : repairBodyFor(requestBody, opened.status, opened.reason);
         if (repairedBody) opened = await openAttempt(repairedBody);
         if (!opened.ok) {
           recordSample(metricsStore, candidate.providerId, candidate.modelId, {
-            latencyMs: opened.latencyMs || timeoutMs, ttftMs: opened.latencyMs || timeoutMs,
+            latencyMs: opened.latencyMs || attemptTimeoutMs, ttftMs: opened.latencyMs || attemptTimeoutMs,
             success: false, error: opened.reason
           });
           errors.push({
@@ -474,13 +476,14 @@ export function executeStreamingWithSplice({
         try { await writeChunk(encoder.encode(DONE_FRAME)); } catch {}
         try { await writer.close(); } catch {}
       } else {
-        fail(503, nonRetryableOpen
-          ? `Non-retryable upstream rejection (${errors[errors.length - 1]?.status || "4xx"}): the account refuses this model — every node answers the same 4xx.`
-          : budgetCut
-          ? `Pre-commit budget exhausted after ${attemptsUsed} attempts in ${Date.now() - startedAt}ms of client-facing silence.`
-          : errors.length >= maxAttempts
-          ? `Retry budget exhausted after ${errors.length} upstream attempts.`
-          : "All candidate nodes failed or capacity exhausted.");
+        // What a dead chain MEANS lives in exhaustion.js: a chain that only
+        // timed out is a gateway timeout (504), a dry book is 503, and both
+        // executors read the same verdict instead of inventing their own.
+        const verdict = classifyExhaustion({
+          errors, attempts: attemptsUsed, elapsedMs: Date.now() - startedAt,
+          budgetCut, nonRetryableOpen, maxAttempts
+        });
+        fail(verdict.status, verdict.message);
       }
     } catch (err) {
       try { await writer.abort(err); } catch {}

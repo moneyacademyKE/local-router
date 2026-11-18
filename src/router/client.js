@@ -7,6 +7,7 @@
 import { recordSample, recordUsage } from "./metrics.js";
 import { getOfficialPrice, CHAIN_FALLBACKS } from "./catalog.js";
 import { executeStreamingWithSplice, DEFAULT_FIRST_BYTE_TIMEOUT_MS, DEFAULT_PRE_COMMIT_BUDGET_MS, MODEL_SCOPED_OPEN_STATUSES } from "./stream.js";
+import { classifyExhaustion } from "./exhaustion.js";
 import { isCodexCreditRefusal } from "./quota.js";
 import { repairBodyFor } from "./repair.js";
 
@@ -244,13 +245,13 @@ export function executeWithFallback({
       };
     }
 
-    const retryBudgetSpent = errors.length >= maxAttempts;
+    // Same verdict as the streaming path, from the same pure function: a
+    // timeout-only chain is a gateway timeout (504), not a dry book (503).
+    const verdict = classifyExhaustion({ errors, attempts: errors.length, maxAttempts });
     return {
       success: false,
-      status: 503,
-      error: retryBudgetSpent
-        ? `Retry budget exhausted after ${errors.length} upstream attempts.`
-        : "All candidate nodes failed or capacity exhausted.",
+      status: verdict.status,
+      error: verdict.message,
       selectedCandidate: candidates[0],
       attempts: errors.length,
       failoverErrors: errors
