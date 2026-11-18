@@ -11,6 +11,7 @@ import { collectAnalytics, renderAnalyticsPage } from "./ui/analytics.js";
 import { corsHeaders, jsonResponse, buildTelemetryHeaders, recordRoutingAnalytics, createStandaloneMockFetch } from "./router/telemetry.js";
 import { checkBodySize, validateChatBody, MAX_BODY_BYTES } from "./router/validate.js";
 import { AUTO_MODEL, getAutoSnapshot, probeQuotaHealth } from "./router/auto.js";
+import { buildDiagnostics } from "./router/diagnostics.js";
 
 const MAX_BODY_BYTES_STRING = MAX_BODY_BYTES;
 
@@ -191,6 +192,17 @@ export default {
     if (path === "/v1/auto" && request.method === "GET") {
       try { return jsonResponse(await getAutoSnapshot(env)); }
       catch { return jsonResponse({ error: "Auto market snapshot unavailable" }, 503); }
+    }
+
+    // One endpoint for "why is the chain this short / this slow / this dead?".
+    // Served order and gates, measured health per member, and the failure
+    // classes behind it. Read-only, admin-gated, and it names no secrets.
+    if (path === "/v1/diagnostics" && request.method === "GET") {
+      const unauthorized = requireAdmin();
+      if (unauthorized) return unauthorized;
+      const db = env?.ROUTING_DB;
+      if (!db) return jsonResponse({ error: "ROUTING_DB binding missing — diagnostics unavailable" }, 503);
+      return jsonResponse(await buildDiagnostics(env, db));
     }
 
     if (path === "/v1/models" && request.method === "GET") {

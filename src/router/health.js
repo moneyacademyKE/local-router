@@ -25,6 +25,12 @@ export const HEALTH_FRESH_MS = 30 * 60 * 1000;
 // "disproven" after this many tries, so a single transient 503 cannot exile
 // a model that has never actually been given a fair run.
 export const HEALTH_MIN_ATTEMPTS = 3;
+// Recency beats the average: a member that answered all day but failed its
+// last attempt two minutes ago is not the head of the chain. Inside this
+// cooldown it is "cooling" — ranked after everything else that might answer,
+// ahead of the members already proven dead. Derived from measurement (the
+// attempt ledger's tail), never from a hand-set flag.
+export const HEALTH_COOLDOWN_MS = 15 * 60 * 1000;
 export const ATTEMPT_RETENTION_DAYS = 7;
 export const HEALTH_ROW_ID = "auto-health";
 
@@ -63,12 +69,22 @@ export async function recordAttempts(env, { requestedModel, failoverErrors, serv
 
 /** Aggregates the attempt ledger into per-model health plus fleet totals.
  * ok/fail are counts; avgMs is the mean latency of the attempts that WORKED
- * (a timeout's latency measures the timeout, not the model). */
+ * (a timeout's latency measures the timeout, not the model).
+ *
+ * Beyond the ratio it keeps the three facts a ratio erases:
+ *   statusCounts — 503 no_capacity, 403 model_disabled, 429 quota and network
+ *                  timeouts are four different diseases that all read "fail";
+ *   lastStatus/lastError — the newest attempt's verdict, so the diagnosis is
+ *                  current rather than averaged into invisibility;
+ *   streak — consecutive failures at the tail, which is what makes the
+ *                  cooldown tier possible at all. */
 export async function aggregateHealth(db, now = Date.now()) {
   const window = `-${HEALTH_WINDOW_HOURS} hours`;
   const res = await db.prepare(
     "SELECT model, SUM(ok) AS ok, SUM(1 - ok) AS fail, " +
-    "CAST(AVG(CASE WHEN ok = 1 THEN latency_ms END) AS INTEGER) AS avg_ms " +
+    "CAST(AVG(CASE WHEN ok = 1 THEN latency_ms END) AS INTEGER) AS avg_ms, " +
+    "CAST(strftime('%s', MAX(CASE WHEN ok = 1 THEN ts END)) AS INTEGER) AS last_ok_s, " +
+    "CAST(strftime('%s', MAX(CASE WHEN ok = 0 THEN ts END)) AS INTEGER) AS last_fail_s " +
     "FROM routing_attempts WHERE ts >= datetime('now', ?1) GROUP BY model"
   ).bind(window).all();
   const rows = res?.results || [];
@@ -78,11 +94,53 @@ export async function aggregateHealth(db, now = Date.now()) {
     const mOk = Number(r.ok) || 0;
     const mFail = Number(r.fail) || 0;
     ok += mOk; fail += mFail;
+    const lastOkS = Number(r.last_ok_s);
+    const lastFailS = Number(r.last_fail_s);
     models[r.model] = {
       ok: mOk, fail: mFail,
       rate: round(mOk / Math.max(1, mOk + mFail)),
-      avgMs: Number.isFinite(r.avg_ms) && r.avg_ms > 0 ? r.avg_ms : null
+      avgMs: Number.isFinite(r.avg_ms) && r.avg_ms > 0 ? r.avg_ms : null,
+      lastOkAt: lastOkS > 0 ? lastOkS * 1000 : null,
+      lastFailAt: lastFailS > 0 ? lastFailS * 1000 : null,
+      statusCounts: {}, lastStatus: null, lastError: null, streak: 0
     };
+  }
+  // Failure classes per model: the same "fail" split by what actually happened.
+  const classes = await db.prepare(
+    "SELECT model, status, COUNT(*) AS n FROM routing_attempts " +
+    "WHERE ts >= datetime('now', ?1) GROUP BY model, status"
+  ).bind(window).all().catch(() => ({ results: [] }));
+  const fleetClasses = {};
+  for (const c of classes?.results || []) {
+    const label = c.status === null || c.status === undefined ? "network" : String(c.status);
+    fleetClasses[label] = (fleetClasses[label] || 0) + (Number(c.n) || 0);
+    const m = models[c.model];
+    if (m) m.statusCounts[label] = Number(c.n) || 0;
+  }
+  // Newest attempts per model (id order — ts is second-granular, id is not).
+  const tail = await db.prepare(
+    "SELECT model, ok, status, error, rn FROM (SELECT model, ok, status, error, " +
+    "ROW_NUMBER() OVER (PARTITION BY model ORDER BY id DESC) AS rn " +
+    "FROM routing_attempts WHERE ts >= datetime('now', ?1)) WHERE rn <= 6"
+  ).bind(window).all().catch(() => ({ results: [] }));
+  const tails = new Map();
+  for (const t of tail?.results || []) {
+    const rn = Number(t.rn);
+    if (!tails.has(t.model)) tails.set(t.model, []);
+    const list = tails.get(t.model);
+    list.push({ rn, ok: Number(t.ok), status: t.status, error: t.error });
+  }
+  for (const [model, list] of tails) {
+    const m = models[model];
+    if (!m) continue;
+    list.sort((a, b) => a.rn - b.rn);
+    const newest = list[0];
+    m.lastStatus = newest.status === null || newest.status === undefined
+      ? null : Number(newest.status);
+    m.lastError = clip(newest.error, 120);
+    let streak = 0;
+    while (streak < list.length && list[streak].ok === 0) streak += 1;
+    m.streak = streak;
   }
   const fastest = Object.values(models)
     .map(m => m.avgMs).filter(v => Number.isFinite(v) && v > 0);
@@ -92,7 +150,8 @@ export async function aggregateHealth(db, now = Date.now()) {
     fleet: {
       ok, fail,
       rate: ok + fail > 0 ? round(ok / (ok + fail)) : null,
-      fastestMs: fastest.length ? Math.min(...fastest) : null
+      fastestMs: fastest.length ? Math.min(...fastest) : null,
+      failureClasses: fleetClasses
     },
     models
   };
@@ -127,11 +186,18 @@ export async function loadHealth(db, now = Date.now()) {
 }
 
 /** Attaches reliability/speed/value to each snapshot member and orders by
- * value in three tiers:
- *   0 proven     — tried, answered, measured value
- *   1 unproven   — never tried, or tried too few times to judge: neutral
+ * value in five tiers, by expected value of the NEXT attempt:
+ *   0 proven     — tried, answered, and its newest attempt answered
+ *   1 thin       — same, but only ONE seller sits inside the bid. It answered,
+ *                  so it is real; its supply is one seller deep, so it is not
+ *                  the head. (It used to be excluded outright: a ban on a
+ *                  belief the ledger can measure. A thin book that cannot
+ *                  answer now demotes itself after three attempts.)
+ *   2 unproven   — never tried, or tried too few times to judge: neutral
  *                  weights, ranked after everything that has proven it works
- *   2 disproven  — tried HEALTH_MIN_ATTEMPTS+ times and never once answered
+ *   3 cooling    — its newest attempt failed inside HEALTH_COOLDOWN_MS. The
+ *                  24h average still looks fine; the last minute does not.
+ *   4 disproven  — tried HEALTH_MIN_ATTEMPTS+ times and never once answered
  *                  (speed 0, value 0)
  * The tiers exist so a new model still gets a chance once the proven members
  * are exhausted, without letting an untested model jump a measured workhorse.
@@ -141,6 +207,10 @@ export function applyValueRanking(snapshot, health) {
   const models = Array.isArray(snapshot?.models) ? snapshot.models : [];
   if (!models.length) return snapshot;
   const fleetRate = Number.isFinite(health?.fleet?.rate) ? health.fleet.rate : null;
+  // Cooldown is judged against the aggregation instant, not wall-clock now:
+  // the payload is cached for up to HEALTH_FRESH_MS, and a cached verdict must
+  // stay reproducible for whoever reads it.
+  const ref = Number.isFinite(health?.computedAt) ? health.computedAt : Date.now();
   const ranked = models.map(m => {
     const h = health?.models?.[m.modelId] || null;
     const ok = h?.ok || 0;
@@ -159,14 +229,19 @@ export function applyValueRanking(snapshot, health) {
         ? Math.min(1, fastest / h.avgMs) : 0;
     }
     const score = Number.isFinite(m.score) ? m.score : 0;
-    return { ...m, reliability: round(reliability), speed: round(speed),
+    const thin = Number(m.inCapDepth) === 1;
+    const cooling = Boolean(h) && Number.isFinite(h.lastFailAt) &&
+      !(Number.isFinite(h.lastOkAt) && h.lastOkAt > h.lastFailAt) &&
+      ref - h.lastFailAt < HEALTH_COOLDOWN_MS;
+    return { ...m, thinBook: thin, reliability: round(reliability), speed: round(speed),
       valueScore: round((score * reliability * speed) / cost),
-      measuredAttempts: attempts,
+      measuredAttempts: attempts, cooling,
       valueTier: attempts === 0 ? "unproven"
-        : (ok > 0 ? "proven"
-          : (attempts >= HEALTH_MIN_ATTEMPTS ? "disproven" : "unproven")) };
+        : cooling ? "cooling"
+          : ok > 0 ? (thin ? "thin" : "proven")
+            : (attempts >= HEALTH_MIN_ATTEMPTS ? "disproven" : "unproven") };
   });
-  const tierRank = { proven: 0, unproven: 1, disproven: 2 };
+  const tierRank = { proven: 0, thin: 1, unproven: 2, cooling: 3, disproven: 4 };
   ranked.sort((a, b) => tierRank[a.valueTier] - tierRank[b.valueTier] ||
     (b.valueScore ?? -1) - (a.valueScore ?? -1) ||
     (b.score ?? 0) - (a.score ?? 0) ||
@@ -174,5 +249,6 @@ export function applyValueRanking(snapshot, health) {
     String(a.modelId).localeCompare(String(b.modelId)));
   return { ...snapshot, health: { windowHours: health?.windowHours ?? null,
     fleetRate, fastestMs: health?.fleet?.fastestMs ?? null,
-    computedAt: health?.computedAt ?? null }, models: ranked };
+    computedAt: health?.computedAt ?? null, cooldownMs: HEALTH_COOLDOWN_MS,
+    failureClasses: health?.fleet?.failureClasses ?? null }, models: ranked };
 }

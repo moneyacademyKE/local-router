@@ -103,9 +103,9 @@
     (is (true? (:isStale res))
         "current and stale D1 snapshots cannot reintroduce retired auto members")))
 
-(deftest single-seller-books-are-bait-and-excluded
+(deftest single-seller-books-are-admitted-and-flagged-thin
   (let [res (run-node-eval
-             "import { buildAutoSnapshot } from './src/router/auto.js';
+             "import { buildAutoSnapshot, chainDiagnostics } from './src/router/auto.js';
               const model = (id, asks) => ({id, pricing: {asks_in: asks.map(x => x/5), asks_out: asks}});
               const feed = {data: [
                 model('oai/gpt-6.1-sol', [0.17, 5]),
@@ -113,13 +113,20 @@
                 model('ali/glm-5.3', [0.035, 0.08]),
                 model('grok/grok-4.7', [0.004, 0.25])
               ]};
-              console.log(JSON.stringify(buildAutoSnapshot(feed, 7200000)));")]
-    (is (= ["grok/grok-4.7" "ali/glm-5.3"] (mapv :modelId (:models res)))
-        "one-seller books drop out of the chain entirely: a lone ask is a price, not a market")
-    (is (= [{:modelId "oai/gpt-6.1-sol" :reason "bait_priced" :ask 0.17 :nextAsk 5}
-            {:modelId "oai/gpt-6.1-terra" :reason "bait_priced" :ask 0.085 :nextAsk 2.5}]
-           (filter #(= "bait_priced" (:reason %)) (:excluded res)))
-        "bait pricing is reported with the lone seller's ask and the cliff behind it")))
+              const snapshot = buildAutoSnapshot(feed, 7200000);
+              console.log(JSON.stringify({snapshot, diagnostics: chainDiagnostics(snapshot)}));")]
+    (let [snapshot (:snapshot res)]
+      (is (= ["oai/gpt-6.1-sol" "oai/gpt-6.1-terra" "grok/grok-4.7" "ali/glm-5.3"]
+             (mapv :modelId (:models snapshot)))
+          "a lone in-cap ask is a real price the router can buy: the model stays in the chain")
+      (is (= [true true false false] (mapv :thinBook (:models snapshot)))
+          "one-seller books are flagged thin so the served order can rank them behind deep books")
+      (is (= [1 1 2 2] (mapv :inCapDepth (:models snapshot))))
+      (is (empty? (filter #(= "bait_priced" (:reason %)) (:excluded snapshot)))
+          "no member is excluded for a thin book — supply is never banned on a belief"))
+    (is (= ["oai/gpt-6.1-sol" "oai/gpt-6.1-terra"] (get-in res [:diagnostics :thinBook])))
+    (is (some #(re-find #"thin book" %) (get-in res [:diagnostics :warnings]))
+        "the diagnostics name the thin books instead of silently shrinking the chain")))
 
 (deftest strict-auto-ranking-ignores-unbounded-ladder-exemptions-and-pins
   (let [res (run-node-eval

@@ -2,7 +2,8 @@
  * on a 30-minute heartbeat (owner rule 2026-11-11).
  * Availability is a ranking weight (owner rule 2026-11-11): a model's real price
  * is what several sellers can sustain inside the output bid, not what one lone
- * ask advertises. A book with a single in-cap seller is bait — excluded. */
+ * ask advertises. A book with a single in-cap seller is admitted but flagged
+ * thinBook (2026-11-18) — depth orders the chain, it does not ban supply. */
 
 import { loadHealth, applyValueRanking } from "./health.js";
 
@@ -93,11 +94,14 @@ export function buildAutoSnapshot(feed, now = Date.now()) {
     // tier this chain can actually buy from. Depth there is the stability weight.
     const inCap = asks.filter(v => v <= AUTO_OUTPUT_BID);
     if (!inCap.length) { excluded.push({ modelId: id, reason: "over_cap", ask: asks[0] }); continue; }
-    if (inCap.length === 1) {
-      const nextAsk = asks.find(v => v > AUTO_OUTPUT_BID) ?? null;
-      excluded.push({ modelId: id, reason: "bait_priced", ask: inCap[0], nextAsk });
-      continue;
-    }
+    // A one-seller book is NOT excluded (2026-11-18). The router buys from that
+    // seller at a price inside the bid, so the model is genuinely purchasable;
+    // excluding it deletes real supply on the strength of a belief ("the lone
+    // ask will vanish") that the attempt ledger can measure instead. It is
+    // admitted flagged thinBook and ranked in the `thin` tier: behind members
+    // whose book is deep, ahead of nothing that answers. A thin book that stops
+    // answering demotes itself after HEALTH_MIN_ATTEMPTS, which is measurement.
+    const thinBook = inCap.length === 1;
     // Cache-adjusted pricing: a cache-capable model's returning conversation
     // buys the cached share of its input at the cache-read rate instead of
     // the fresh ask. The price tie-break uses the router's own 25/75
@@ -110,7 +114,7 @@ export function buildAutoSnapshot(feed, now = Date.now()) {
     const depthPrice = inCap[inCap.length - 1];
     const effectiveBlended = Number(((0.25 * effectiveInput) + (0.75 * depthPrice)).toFixed(6));
     models.push({ modelId: id, score, prompt, completion: asks[0],
-      askCount: asks.length, inCapDepth: inCap.length, depthPrice,
+      askCount: asks.length, inCapDepth: inCap.length, depthPrice, thinBook,
       supportsCache, effectiveInput, effectiveBlended });
   }
   // Build-time order is capability-led; the served order is the measured value
@@ -240,6 +244,50 @@ async function withValueOrder(snapshot, db, now) {
   } catch { return snapshot; }
 }
 
+/** One-glance explanation of the served chain: why it is this deep, who is
+ * cooling, and what single price change would widen it. The router already
+ * knew all of this — it just never said it, so every question about a short
+ * chain needed a SQL session. Pure function of the snapshot: no I/O, no
+ * secrets, nothing that can fail. */
+export function chainDiagnostics(snapshot, bid = AUTO_OUTPUT_BID) {
+  const models = Array.isArray(snapshot?.models) ? snapshot.models : [];
+  const excluded = Array.isArray(snapshot?.excluded) ? snapshot.excluded : [];
+  const gateCounts = {};
+  for (const e of excluded) {
+    const reason = e?.reason || "unknown";
+    gateCounts[reason] = (gateCounts[reason] || 0) + 1;
+  }
+  const lockedOut = excluded
+    .filter(e => e.reason === "over_cap" && Number.isFinite(e.ask))
+    .sort((a, b) => a.ask - b.ask);
+  const unlock = lockedOut.length
+    ? { modelId: lockedOut[0].modelId, ask: lockedOut[0].ask,
+      gap: Number((lockedOut[0].ask - bid).toFixed(6)) }
+    : null;
+  const cooling = models.filter(m => m.valueTier === "cooling").map(m => m.modelId);
+  const thin = models.filter(m => m.thinBook === true).map(m => m.modelId);
+  const gates = Object.entries(gateCounts)
+    .map(([reason, n]) => `${n} ${reason}`).join(", ");
+  const warnings = [];
+  if (!models.length) {
+    warnings.push("chain is empty: nothing is buyable inside the output bid");
+  } else if (models.length < 3) {
+    warnings.push(`chain depth ${models.length} of ${models.length + excluded.length} declared members` +
+      (gates ? ` (${gates})` : ""));
+  }
+  if (models.length && !models.some(m => m.valueTier === "proven")) {
+    warnings.push("no proven member: every candidate is unproven, thin or cooling");
+  }
+  if (cooling.length) warnings.push(`cooling after a recent failure: ${cooling.join(", ")}`);
+  if (thin.length) warnings.push(`thin book, one in-cap seller: ${thin.join(", ")}`);
+  if (unlock) warnings.push(`raise the output bid to ${unlock.ask} to admit ${unlock.modelId}`);
+  const head = models[0] || null;
+  return { bid, chainDepth: models.length, gateCounts, thinBook: thin, cooling,
+    head: head ? { modelId: head.modelId, valueTier: head.valueTier,
+      valueScore: head.valueScore, measuredAttempts: head.measuredAttempts } : null,
+    unlock, warnings };
+}
+
 /**
  * Serves the current hour's D1 snapshot; the first call after each boundary
  * refreshes it from the live feed. A failed refresh serves the last live
@@ -251,13 +299,17 @@ async function withValueOrder(snapshot, db, now) {
  * Ordering layers, innermost first: the build (capability), the measured
  * value order (reliability/speed/cost), and quota health last — a member whose
  * sellers are out of quota is demoted regardless of how good its value is.
+ * Diagnostics ride on the result: they describe the chain, they never shape it.
  */
 export async function getAutoSnapshot(env, fetchFn = fetch, now = Date.now()) {
   const db = env?.ROUTING_DB;
   if (!db || !env?.INFERHUB_API_KEY) throw new Error("Auto chain needs D1 and a live market key");
   const hour = Math.floor(now / AUTO_HOUR_MS);
-  const serve = async (row) => withQuotaHealth(
-    await withValueOrder(withStaleness(row, hour), db, now), db, hour);
+  const serve = async (row) => {
+    const snapshot = await withQuotaHealth(
+      await withValueOrder(withStaleness(row, hour), db, now), db, hour);
+    return { ...snapshot, diagnostics: chainDiagnostics(snapshot) };
+  };
   let row = await readSnapshot(db);
   if (row && Number(row.hour) === hour) return serve(row);
 

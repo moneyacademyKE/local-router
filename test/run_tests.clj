@@ -30,6 +30,7 @@
 (load-file "test/soak_test.clj")
 (load-file "test/latency_test.clj")
 (load-file "test/value_ranking_test.clj")
+(load-file "test/diagnostics_test.clj")
 
 (let [catalog-res (run-tests 'catalog-test)
       metrics-res (run-tests 'metrics-test)
@@ -56,16 +57,17 @@
       soak-res (run-tests 'soak-test)
       latency-res (run-tests 'latency-test)
       value-ranking-res (run-tests 'value-ranking-test)
+      diagnostics-res (run-tests 'diagnostics-test)
       total-fail  (+ (:fail catalog-res) (:fail metrics-res) (:fail pricing-res)
                      (:fail pareto-res) (:fail client-res) (:fail fallback-res) (:fail security-res)
                      (:fail stream-res) (:fail usage-res) (:fail chase-res)
                      (:fail cache-res) (:fail session-res) (:fail swr-res) (:fail worker-res)
-                     (:fail refusal-res) (:fail tool-stream-res) (:fail auto-res) (:fail auto-worker-res) (:fail quota-res) (:fail quota-worker-res) (:fail local-runtime-res) (:fail telemetry-res) (:fail soak-res) (:fail latency-res) (:fail value-ranking-res))
+                     (:fail refusal-res) (:fail tool-stream-res) (:fail auto-res) (:fail auto-worker-res) (:fail quota-res) (:fail quota-worker-res) (:fail local-runtime-res) (:fail telemetry-res) (:fail soak-res) (:fail latency-res) (:fail value-ranking-res) (:fail diagnostics-res))
       total-err   (+ (:error catalog-res) (:error metrics-res) (:error pricing-res)
                      (:error pareto-res) (:error client-res) (:error fallback-res) (:error security-res)
                      (:error stream-res) (:error usage-res) (:error chase-res)
                      (:error cache-res) (:error session-res) (:error swr-res) (:error worker-res)
-                     (:error refusal-res) (:error tool-stream-res) (:error auto-res) (:error auto-worker-res) (:error quota-res) (:error quota-worker-res) (:error local-runtime-res) (:error telemetry-res) (:error soak-res) (:error latency-res) (:error value-ranking-res))]
+                     (:error refusal-res) (:error tool-stream-res) (:error auto-res) (:error auto-worker-res) (:error quota-res) (:error quota-worker-res) (:error local-runtime-res) (:error telemetry-res) (:error soak-res) (:error latency-res) (:error value-ranking-res) (:error diagnostics-res))]
   (println "\n----------------------------------------------------------")
   (if (and (zero? total-fail) (zero? total-err))
     (do
