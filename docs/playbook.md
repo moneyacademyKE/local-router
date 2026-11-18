@@ -18,15 +18,30 @@ bb dev
 ```
 
 ## 2. Deploying to Cloudflare Workers with Wrangler
-Using `bunx wrangler`:
+One command, pinned, in the right order:
 
 ```bash
-# Local development with Wrangler
-bunx wrangler dev
-
-# Deploy to Cloudflare Edge worldwide
-bunx wrangler deploy
+# Migrations (remote) -> deploy -> snapshot bust -> read the chain back
+./scripts/deploy.sh
 ```
+
+`bunx wrangler` is **not** pinned — it resolves whatever is latest (4.164.0 the
+day 4.163.0 was the version under test). Always name the version when you call
+wrangler directly:
+
+```bash
+# Local development
+bunx wrangler@4.163.0 dev
+
+# Deploy by hand (prefer scripts/deploy.sh: it also applies migrations)
+bunx wrangler@4.163.0 deploy
+```
+
+A green `wrangler deploy` is not a correct deploy. On 2026-11-18 the worker
+shipped writing to `routing_attempts` while remote D1 was still at migration
+0003, so every attempt insert threw silently; the snapshot cache was stale on
+top of it. Migrations and the cache bust are part of the deploy, which is why
+they live in the script.
 
 ## 3. Model Catalog (current: 6 chain products)
 Routing is data-driven from `src/router/catalog.js` — chains are plain arrays; the router resolves the first link that has a live, in-budget spot ask:
@@ -83,8 +98,8 @@ rows recorded success but not one token.
 
 ```bash
 # Apply migrations (idempotent via D1 migrations tracking)
-bunx wrangler d1 migrations apply infered-routing --remote
-bunx wrangler d1 migrations apply infered-routing --local
+bunx wrangler@4.163.0 d1 migrations apply infered-routing --remote
+bunx wrangler@4.163.0 d1 migrations apply infered-routing --local
 ```
 
 The INSERT in `src/router/telemetry.js` and the pin upsert in
@@ -111,7 +126,7 @@ local D1, no Cloudflare dependency for the primary door.
   and responds in ~30ms — the old 30s curl timeouts were the handler blocking
   on the battery; D1 was always the real signal).
 - Local D1: `.wrangler/state/v3/d1` — migrations applied via
-  `bunx wrangler d1 migrations apply infered-routing --local`.
+  `bunx wrangler@4.163.0 d1 migrations apply infered-routing --local`.
 - Logs/state: `~/.opencrabs/state/infered-local/`.
 - Endpoint: `http://127.0.0.1:8790/v1` (OpenCrabs provider `tupesa`).
 
