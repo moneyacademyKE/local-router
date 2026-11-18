@@ -21,7 +21,7 @@
               (let [r (http/post (str base "/chat/completions")
                                  {:headers {"Authorization" (str "Bearer " api-key)
                                             "Content-Type" "application/json"
-                                            "x-max-output-price" "0.999999"}
+                                            "x-max-output-price" "1"}
                                   :body (json/generate-string
                                           {:model m :stream stream?
                                            :messages [{:role "user" :content "Reply OK."}]

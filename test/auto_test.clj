@@ -147,9 +147,11 @@
               console.log(JSON.stringify({normal:rank(null).map(c=>({id:c.modelId,bid:c.maxOutputPrice})),
                 capped:rank(0.2).map(c=>({id:c.modelId,bid:c.maxOutputPrice})),
                 missing:rank(null).length && rank(0.001).length}));")]
-    (is (= ["oai/gpt-6.1-sol" "ali/glm-5.3"] (mapv :id (:normal res))))
+    (is (= ["cx/gpt-6-astra" "oai/gpt-6.1-sol" "ali/glm-5.3"] (mapv :id (:normal res)))
+        "a $1.00/M ask sits exactly on the ceiling, not one rounding step outside it")
     (is (= ["ali/glm-5.3"] (mapv :id (:capped res))))
-    (is (every? #(< (:bid %) 1) (:normal res)))
+    (is (every? #(= 1 (:bid %)) (:normal res))
+        "an uncapped request is still bounded at the $1.00/M ceiling")
     (is (= 0.2 (-> res :capped first :bid)))
     (is (zero? (:missing res)) "no Infinity or exempt-model escape hatch")))
 
@@ -162,14 +164,14 @@
                 return new Response(JSON.stringify({choices:[{message:{role:'assistant',content:'ok'}}]}),
                   {status:200,headers:{'Content-Type':'application/json'}}); };
               const candidate={providerId:'auto-node',modelId:'ali/glm-5.3',quote:{prompt:0.01,completion:0.03},
-                maxOutputPrice:0.999999,savingsPct:90,blendedPrice:0.03};
+                maxOutputPrice:1,savingsPct:90,blendedPrice:0.03};
               for (const stream of [false,true]) {
                 const r=await executeWithFallback({candidates:[candidate],requestBody:{stream,messages:[{role:'user',content:'hi'}]},
                   apiKey:'test',metricsStore:createMetricsStore(),fetchFn});
                 if (r.stream) await new Response(r.stream).text();
               }
               console.log(JSON.stringify({bids}));")]
-    (is (= ["0.999999" "0.999999"] (:bids res)) "bid enforced by marketplace on both wire paths")))
+    (is (= ["1" "1"] (:bids res)) "bid enforced by marketplace on both wire paths")))
 
 (deftest cache-adjusted-effective-input-orders-and-surfaces
   (let [res (run-node-eval
@@ -270,7 +272,7 @@
                 const slim = (r) => Object.fromEntries(Object.entries(r).map(([k, v]) =>
                   [k, {status: v.status, sellersTotal: v.sellersTotal, sellersOut: v.sellersOut}]));
                 console.log(JSON.stringify({exported: true, results: slim(health.results),
-                  probed: bodies.map(b => b.model), bid: bodies.every(b => b.bid === '0.999999'),
+                  probed: bodies.map(b => b.model), bid: bodies.every(b => b.bid === '1'),
                   tokens: bodies.every(b => b.maxTokens === 8),
                   persistedResults: persisted && slim(persisted.results), persistedHour: persisted && persisted.hour}));}")]
     (is (true? (:exported res)) "probeQuotaHealth is exported from auto.js")

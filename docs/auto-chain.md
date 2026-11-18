@@ -44,7 +44,7 @@ The assumption covers ranking economics only. What a request actually pays depen
 
 ## Hard output-rate boundary
 
-Every auto attempt, streaming or nonstreaming, carries InferHub's documented `x-max-output-price: 0.999999` bid. The router also filters by that cap, ignores the ordinary unlimited fallback and Astra's exemption for auto, and honors a caller's lower `X-Infered-Max-Price`. If no eligible model is available, the request fails rather than raising the ceiling. InferHub enforces the bid at seller selection time.
+Every auto attempt, streaming or nonstreaming, carries an `x-max-output-price: 1` bid — a **$1.00/M output ceiling**, inclusive of the boundary (owner directive 2026-11-18). The earlier fence sat one millionth below $1.00, which locked out `cx/gpt-6-astra` (ask exactly $1.00) on rounding rather than on policy and left the live chain one member deep. The router also filters by that cap, ignores the ordinary unlimited fallback and Astra's exemption for auto, and honors a caller's lower `X-Infered-Max-Price`. If no eligible model is available, the request fails rather than raising the ceiling. InferHub enforces the bid at seller selection time.
 
 The limit is **per million output tokens**, not per request. It does not cap input-token prices, total tokens, minimum charges, or other service fees. It also does not govern a separate OpenCrabs provider fallback after a router request fails; that provider must have its own budget controls.
 

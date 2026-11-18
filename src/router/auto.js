@@ -8,7 +8,12 @@
 import { loadHealth, applyValueRanking } from "./health.js";
 
 export const AUTO_MODEL = "infered/auto";
-export const AUTO_OUTPUT_BID = 0.999999;
+// Output-price ceiling per attempt (owner directive 2026-11-18). The previous
+// fence sat one millionth of a dollar below cx/gpt-6-astra's only ask ($1.00),
+// so a rounding artifact — not a spending decision — collapsed the chain to a
+// single member. The ceiling is now exactly $1.00/M output; anything above
+// stays out.
+export const AUTO_OUTPUT_BID = 1;
 export const AUTO_HOUR_MS = 60 * 60 * 1000;
 // Heartbeat cadence (owner directive 2026-11-11): measured availability and
 // the scheduled refresh run every 30 minutes, without changing hourly D1 keys.

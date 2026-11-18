@@ -10,14 +10,14 @@
 
 (defn family [id] (first (str/split (str id) #"/")))
 
-;; recompute in-cap depth from the full ask ladder: ask <= $0.999999
+;; recompute in-cap depth from the full ask ladder: ask <= $1.00
 (def feed-asks
   (->> (json/parse-string (slurp ".market-asks.json") true)
        (map (fn [m] [(keyword (:id m)) (:asks_out m)]))
        (into {})))
 
 (defn in-cap [id]
-  (count (filter #(<= (double %) 0.999999) (get feed-asks (keyword id) []))))
+  (count (filter #(<= (double %) 1) (get feed-asks (keyword id) []))))
 
 (defn fmt [m]
   (println (str/join "|" [(str (:id m)) (str (:label m)) (str (:min_in m))
