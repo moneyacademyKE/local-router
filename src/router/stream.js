@@ -36,11 +36,14 @@ import { streamUsage, finalizeUsage, USAGE_NEEDLE } from "./usage.js";
 const DEFAULT_TIMEOUT_MS = 25000;
 export const DEFAULT_FIRST_BYTE_TIMEOUT_MS = 15000;
 export const DEFAULT_PRE_COMMIT_BUDGET_MS = 30000;
-// 4xx client-error class: the failure is model- or account-level, NOT
-// node-level — every remaining candidate refuses identically, so chasing
-// them is pure silent dead time before the client's answer.
-const NON_RETRYABLE_OPEN_STATUSES = new Set([400, 401, 403, 404]);
-export { NON_RETRYABLE_OPEN_STATUSES };
+// 401/403/404 are account- or model-level refusals: every node answers the same
+// 4xx, so chasing them is dead time. 400 is NOT — this gateway serves model-scoped
+// argument errors through it ("Invalid reasoning effort"), and on 2026-11-17
+// grok-first 400'd 84 times while cx/gpt-6.1-terra served 346 in the same window.
+// A 400 therefore poisons that model for this request and must still fail over.
+const NON_RETRYABLE_OPEN_STATUSES = new Set([401, 403, 404]);
+const MODEL_SCOPED_OPEN_STATUSES = new Set([400, 401, 403, 404]);
+export { NON_RETRYABLE_OPEN_STATUSES, MODEL_SCOPED_OPEN_STATUSES };
 const MAX_FIRST_CHUNK_BYTES = 1 * 1024 * 1024;
 const MAX_SSE_EVENT_CHARS = 1 * 1024 * 1024;
 const ERROR_NEEDLE = '{"error":{';
@@ -308,11 +311,8 @@ export function executeStreamingWithSplice({
             error: opened.reason
           });
           if (opened.clientGone) break;
-          if (NON_RETRYABLE_OPEN_STATUSES.has(opened.status)) {
-            nonRetryableOpen = true;
-            refusedModels.add(candidate.modelId);
-            continue;
-          }
+          if (MODEL_SCOPED_OPEN_STATUSES.has(opened.status)) refusedModels.add(candidate.modelId);
+          if (NON_RETRYABLE_OPEN_STATUSES.has(opened.status)) nonRetryableOpen = true;
           continue;
         }
 

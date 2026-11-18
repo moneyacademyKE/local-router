@@ -6,7 +6,7 @@
 
 import { recordSample, recordUsage } from "./metrics.js";
 import { getOfficialPrice, CHAIN_FALLBACKS } from "./catalog.js";
-import { executeStreamingWithSplice, DEFAULT_FIRST_BYTE_TIMEOUT_MS, DEFAULT_PRE_COMMIT_BUDGET_MS, NON_RETRYABLE_OPEN_STATUSES } from "./stream.js";
+import { executeStreamingWithSplice, DEFAULT_FIRST_BYTE_TIMEOUT_MS, DEFAULT_PRE_COMMIT_BUDGET_MS, MODEL_SCOPED_OPEN_STATUSES } from "./stream.js";
 import { isCodexCreditRefusal } from "./quota.js";
 
 const DEFAULT_TIMEOUT_MS = 25000;
@@ -218,7 +218,7 @@ export function executeWithFallback({
           latencyMs: result.latencyMs ?? null,
           error: result.error
         });
-        if (NON_RETRYABLE_OPEN_STATUSES.has(result.status)) {
+        if (MODEL_SCOPED_OPEN_STATUSES.has(result.status)) {
           refusedModels.add(candidate.modelId);
         }
       }
