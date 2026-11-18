@@ -17,9 +17,12 @@
 
 import { getAutoSnapshot } from "./auto.js";
 import { loadHealth } from "./health.js";
+import { isCircuitOpen } from "./metrics.js";
 
 const FAILURE_WINDOW = "-24 hours";
 const RECENT_LIMIT = 10;
+// The auto chain's provider id, as pareto.js stamps it on every candidate.
+const AUTO_PROVIDER_ID = "inferhub-auto";
 
 async function rows(db, sql) {
   try {
@@ -51,10 +54,37 @@ export async function recentFailures(db) {
 }
 
 /**
- * Build the whole diagnostics payload.
- * `env` needs ROUTING_DB; `now` is injectable so tests pin the health window.
+ * Circuit state per chain member, plus the order a request will actually try.
+ *
+ * `pareto.js` sorts a tripped circuit to the BACK of the chain, so the served
+ * order and the attempted order diverge exactly when a member is failing —
+ * which is the moment someone is reading diagnostics. Naming both is the
+ * difference between "the head model answered" and "the head model was never
+ * tried, and here is why".
  */
-export async function buildDiagnostics(env, db, now = Date.now()) {
+export function circuitState(models, metricsStore) {
+  const tripped = [];
+  for (const model of models) {
+    try {
+      if (isCircuitOpen(metricsStore, AUTO_PROVIDER_ID, model?.modelId)) tripped.push(model.modelId);
+    } catch {
+      // No metrics store (or a malformed one): state is unknown, never guessed.
+    }
+  }
+  const trippedSet = new Set(tripped);
+  const attemptedOrder = models
+    .filter(m => !trippedSet.has(m?.modelId))
+    .map(m => m?.modelId)
+    .concat(tripped);
+  return { providerId: AUTO_PROVIDER_ID, tripped, attemptedOrder };
+}
+
+/**
+ * Build the whole diagnostics payload.
+ * `env` needs ROUTING_DB; `now` is injectable so tests pin the health window;
+ * `metricsStore` is the in-memory circuit/latency store the request path uses.
+ */
+export async function buildDiagnostics(env, db, now = Date.now(), metricsStore = null) {
   let chain = null;
   let chainError = null;
   try {
@@ -80,6 +110,7 @@ export async function buildDiagnostics(env, db, now = Date.now()) {
         stale: chain.stale === true
       }
       : { error: chainError },
+    circuits: chain ? circuitState(chain.models || [], metricsStore) : null,
     health,
     failures: { classes, recent }
   };

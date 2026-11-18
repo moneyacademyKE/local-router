@@ -202,7 +202,7 @@ export default {
       if (unauthorized) return unauthorized;
       const db = env?.ROUTING_DB;
       if (!db) return jsonResponse({ error: "ROUTING_DB binding missing — diagnostics unavailable" }, 503);
-      return jsonResponse(await buildDiagnostics(env, db));
+      return jsonResponse(await buildDiagnostics(env, db, Date.now(), metricsStore));
     }
 
     if (path === "/v1/models" && request.method === "GET") {

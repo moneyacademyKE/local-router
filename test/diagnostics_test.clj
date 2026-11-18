@@ -115,3 +115,29 @@
         "the chain diagnostics block rides along, so /v1/diagnostics is self-contained")
     (is (= "grok/grok-4.7" (get-in res [:chain :models 0 :modelId]))
         "the full model rows ship too — the caller should not need a second call")))
+
+(deftest circuit-tripped-members-move-to-the-back-of-the-attempt-order
+  ;; pareto.js sorts a tripped circuit to the END of the chain, so the served
+  ;; order and the tried order diverge exactly when a member is failing. The
+  ;; diagnostic has to say so, or the head model looks like it answered.
+  (let [res (run-node-eval
+             "import { circuitState } from './src/router/diagnostics.js';
+              import { createMetricsStore } from './src/router/metrics.js';
+              const store = createMetricsStore();
+              store.providers['inferhub-auto::grok/grok-4.7'] = {
+                circuitState: 'open', circuitTrippedAt: Date.now(),
+                emaLatency: 400, emaTtft: 200, totalRequests: 3,
+                successfulRequests: 0, failedRequests: 3, recentSamples: []
+              };
+              const models = [{modelId: 'grok/grok-4.7'}, {modelId: 'ali/kimi-k3.1-pro'}];
+              const out = circuitState(models, store);
+              const none = circuitState(models, null);
+              console.log(JSON.stringify({out, none}));")]
+    (is (= ["grok/grok-4.7"] (:tripped (:out res)))
+        "a tripped circuit is named, not silently reordered")
+    (is (= ["ali/kimi-k3.1-pro" "grok/grok-4.7"] (:attemptedOrder (:out res)))
+        "the attempted order puts the tripped member last — the order a request really tries")
+    (is (= [] (:tripped (:none res)))
+        "no metrics store means unknown, never a guess")
+    (is (= ["grok/grok-4.7" "ali/kimi-k3.1-pro"] (:attemptedOrder (:none res)))
+        "with no circuit evidence the served order stands")))
