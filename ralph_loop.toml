@@ -1,0 +1,56 @@
+# Ralph verification gate for this repo (#1902): a project-level file wins over
+# the bundled fallback at ~/.opencrabs/safety/ralph_loop.toml.
+#
+# Why this exists: every completion in the 2026-11-18 batch was logged
+# UNCERTAIN even though bb test-all and bb lint were green. The fallback ships
+# with no [verification.task_type_commands], so "silence is not proof" fired on
+# work that had receipts. That is the gate doing its job against a missing
+# config — the fix is the commands below, not a softer policy.
+#
+# bh/bb live in /opt/homebrew/bin, which is not on the path a verifier inherits,
+# so each command carries it. Keep these cheap and deterministic: a command that
+# cannot run here blocks every completion of its type.
+
+[verification]
+enabled = true
+require_all_pass = true
+criteria_policy = "downgrade"
+
+[[verification.task_type_commands]]
+task_type = "build"
+commands = [
+  "PATH=/opt/homebrew/bin:$PATH bb lint",
+  "git diff --check"
+]
+
+[[verification.task_type_commands]]
+task_type = "test"
+commands = ["PATH=/opt/homebrew/bin:$PATH bb test-all"]
+
+[[verification.task_type_commands]]
+task_type = "edit"
+commands = [
+  "PATH=/opt/homebrew/bin:$PATH bb lint",
+  "git diff --check"
+]
+
+[[verification.task_type_commands]]
+task_type = "create"
+commands = ["git diff --check"]
+
+[[verification.task_type_commands]]
+task_type = "refactor"
+commands = ["PATH=/opt/homebrew/bin:$PATH bb test-all"]
+
+[[verification.task_type_commands]]
+task_type = "configuration"
+commands = ["git diff --check"]
+
+[[verification.task_type_commands]]
+task_type = "documentation"
+commands = ["git diff --check"]
+
+[forward]
+max_iterations = 20
+fresh_context = true
+state_on_disk = true
