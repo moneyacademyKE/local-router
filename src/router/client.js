@@ -8,6 +8,7 @@ import { recordSample, recordUsage } from "./metrics.js";
 import { getOfficialPrice, CHAIN_FALLBACKS } from "./catalog.js";
 import { executeStreamingWithSplice, DEFAULT_FIRST_BYTE_TIMEOUT_MS, DEFAULT_PRE_COMMIT_BUDGET_MS, MODEL_SCOPED_OPEN_STATUSES } from "./stream.js";
 import { isCodexCreditRefusal } from "./quota.js";
+import { repairBodyFor } from "./repair.js";
 
 const DEFAULT_TIMEOUT_MS = 25000;
 
@@ -156,15 +157,23 @@ export function executeWithFallback({
       if (errors.length >= maxAttempts) break;
       if (refusedModels.has(candidate.modelId)) continue;
 
-      const result = await executeCandidateRequest({
+      // One body repair per candidate: a 400 that names a field is upstream
+      // telling us what it disliked, not that the model is broken. Retry the
+      // same candidate once without that field before branding it refused.
+      const attempt = (body) => executeCandidateRequest({
         candidate,
-        requestBody,
+        requestBody: body,
         apiKey,
         fetchFn,
         baseUrl,
         timeoutMs,
         requestSignal
       });
+      let result = await attempt(requestBody);
+      if (!result.success) {
+        const repaired = repairBodyFor(requestBody, result.status, result.error);
+        if (repaired) result = await attempt(repaired);
+      }
 
       if (result.success) {
         const usage = result.usage || { prompt_tokens: 20, completion_tokens: 30 };

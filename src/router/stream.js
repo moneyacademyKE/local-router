@@ -32,15 +32,14 @@ import { recordSample, recordUsage } from "./metrics.js";
 import { takeCompleteSseFrames, windowHasCompletionToken, jsonCompletionToSseStream } from "./sse.js";
 import { createQuotaFrameGate } from "./quota.js";
 import { streamUsage, finalizeUsage, USAGE_NEEDLE } from "./usage.js";
+import { repairBodyFor } from "./repair.js";
 
 const DEFAULT_TIMEOUT_MS = 25000;
 export const DEFAULT_FIRST_BYTE_TIMEOUT_MS = 15000;
 export const DEFAULT_PRE_COMMIT_BUDGET_MS = 30000;
 // 401/403/404 are account- or model-level refusals: every node answers the same
 // 4xx, so chasing them is dead time. 400 is NOT — this gateway serves model-scoped
-// argument errors through it ("Invalid reasoning effort"), and on 2026-11-17
-// grok-first 400'd 84 times while cx/gpt-6.1-terra served 346 in the same window.
-// A 400 therefore poisons that model for this request and must still fail over.
+// argument errors through it, so a 400 poisons that model for this request only.
 const NON_RETRYABLE_OPEN_STATUSES = new Set([401, 403, 404]);
 const MODEL_SCOPED_OPEN_STATUSES = new Set([400, 401, 403, 404]);
 export { NON_RETRYABLE_OPEN_STATUSES, MODEL_SCOPED_OPEN_STATUSES };
@@ -296,10 +295,11 @@ export function executeStreamingWithSplice({
         }
         attemptsUsed++;
 
-        const opened = await openUpstreamStream({
-          candidate, requestBody, apiKey, fetchFn, baseUrl,
-          timeoutMs, firstByteTimeoutMs, requestSignal
-        });
+        // A 400 naming a field is a body verdict: repair once, then judge.
+        const openAttempt = (b) => openUpstreamStream({ candidate, requestBody: b, apiKey, fetchFn, baseUrl, timeoutMs, firstByteTimeoutMs, requestSignal });
+        let opened = await openAttempt(requestBody);
+        const repairedBody = opened.ok || opened.clientGone ? null : repairBodyFor(requestBody, opened.status, opened.reason);
+        if (repairedBody) opened = await openAttempt(repairedBody);
         if (!opened.ok) {
           recordSample(metricsStore, candidate.providerId, candidate.modelId, {
             latencyMs: opened.latencyMs || timeoutMs, ttftMs: opened.latencyMs || timeoutMs,
