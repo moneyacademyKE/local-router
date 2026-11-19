@@ -143,6 +143,13 @@ export function executeWithFallback({
     }
 
     const errors = [];
+    // Budget bookkeeping for the non-streaming path. The streaming executor
+    // clamps each attempt to the budget that admitted it; this loop used to
+    // accept preCommitBudgetMs and never read it, so two 25s timeouts ran
+    // 50s against a 30s budget (live 2026-11-18/19, infered/auto).
+    const startedAt = Date.now();
+    const remainingBudgetMs = () => preCommitBudgetMs - (Date.now() - startedAt);
+    let budgetCut = false;
     // Same contract as the streaming path: a 4xx from upstream is an account
     // verdict about the MODEL, not a flaky node — one refusal poisons every
     // remaining node of that model. Without this, a disabled model's whole
@@ -157,23 +164,40 @@ export function executeWithFallback({
       if (requestSignal && requestSignal.aborted) break;
       if (errors.length >= maxAttempts) break;
       if (refusedModels.has(candidate.modelId)) continue;
+      if (remainingBudgetMs() <= 0) {
+        budgetCut = true;
+        break;
+      }
 
       // One body repair per candidate: a 400 that names a field is upstream
       // telling us what it disliked, not that the model is broken. Retry the
       // same candidate once without that field before branding it refused.
-      const attempt = (body) => executeCandidateRequest({
-        candidate,
-        requestBody: body,
-        apiKey,
-        fetchFn,
-        baseUrl,
-        timeoutMs,
-        requestSignal
-      });
+      // The timeout is recomputed per call so neither the first try nor the
+      // repair can outlive the budget that admitted the candidate.
+      const attempt = (body) => {
+        const leftMs = remainingBudgetMs();
+        if (leftMs <= 0) {
+          budgetCut = true;
+          return null;
+        }
+        return executeCandidateRequest({
+          candidate,
+          requestBody: body,
+          apiKey,
+          fetchFn,
+          baseUrl,
+          timeoutMs: Math.min(timeoutMs, leftMs),
+          requestSignal
+        });
+      };
       let result = await attempt(requestBody);
+      if (!result) break;
       if (!result.success) {
         const repaired = repairBodyFor(requestBody, result.status, result.error);
-        if (repaired) result = await attempt(repaired);
+        if (repaired) {
+          result = await attempt(repaired);
+          if (!result) break;
+        }
       }
 
       if (result.success) {
@@ -246,8 +270,15 @@ export function executeWithFallback({
     }
 
     // Same verdict as the streaming path, from the same pure function: a
-    // timeout-only chain is a gateway timeout (504), not a dry book (503).
-    const verdict = classifyExhaustion({ errors, attempts: errors.length, maxAttempts });
+    // timeout-only chain is a gateway timeout (504), not a dry book (503),
+    // and a chase the budget cut short says so instead of blaming capacity.
+    const verdict = classifyExhaustion({
+      errors,
+      attempts: errors.length,
+      elapsedMs: Date.now() - startedAt,
+      budgetCut,
+      maxAttempts
+    });
     return {
       success: false,
       status: verdict.status,
