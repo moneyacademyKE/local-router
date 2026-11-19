@@ -1,5 +1,7 @@
 # `infered/auto`
 
+The `infered/` prefix is a namespace, not part of the product: a request naming `auto` resolves to this same chain. Every alias that omits the prefix (`auto`, `glm-budget`, `astra-budget`, `solterra`, …) is canonicalised to its `infered/` form before routing, so a client cannot silently land on the default cascade by leaving the prefix off. Raw model ids and unknown names keep their existing path — an unknown name still resolves to the default `infered/glm-budget` chain.
+
 `infered/auto` selects from the eight models in its roster (`src/router/auto.js`). Its fixed intelligence scores are an Artificial Analysis benchmark snapshot, not live or task-specific quality scores. The roster grew from the 10 November 2026 comparison: `grok/grok-4.7` (score 35.5, 9 in-cap sellers at $0.006/M out) remains in the roster; the retired Sonnet entry is no longer probed or ranked. The same day `ag/gemini-4-carbon` (score 60.0, the market's top score, $0.01–$0.50/M out asks) joined under the seller-quota rule below: its thin book saturates hard, and measured quota health demotes it below available members until supply recovers. `ag/gemini-4-argon` is market-eligible but **excluded by owner directive (2026-11-11)**; a test pin keeps it out of the roster.
 
 ## Try order vs. capability score
