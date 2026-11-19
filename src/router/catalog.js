@@ -150,22 +150,39 @@ export const VIRTUAL_ALIASES = {
 };
 
 /**
+ * Canonicalises a requested model name. The `infered/` prefix is a namespace,
+ * not part of the product: `auto` and `infered/auto` are the same chain, and a
+ * client that omits the prefix must not silently land on the default cascade.
+ * (Measured 2026-11-19: `model: "auto"` fell through to the default glm-budget
+ * chain and was served by grok at a $1.20 ask the auto pool excludes.)
+ * Raw model ids and unknown names come back unchanged — lowercased only — so
+ * their existing resolution path is untouched.
+ */
+export function canonicalModelName(modelName) {
+  const clean = (modelName || "").trim().toLowerCase();
+  if (!clean) return "";
+  if (VIRTUAL_ALIASES[clean] || MODEL_TIERS[clean]) return clean;
+  const prefixed = `infered/${clean}`;
+  return VIRTUAL_ALIASES[prefixed] ? prefixed : clean;
+}
+
+/**
  * Resolves a requested model name to a list of candidate model IDs.
  */
 export function resolveVirtualModel(modelName) {
-  if (!modelName) return VIRTUAL_ALIASES[DEFAULT_MODEL];
-  const cleanName = modelName.trim().toLowerCase();
-  
-  if (VIRTUAL_ALIASES[cleanName]) {
-    return VIRTUAL_ALIASES[cleanName];
+  const name = canonicalModelName(modelName);
+  if (!name) return VIRTUAL_ALIASES[DEFAULT_MODEL];
+
+  if (VIRTUAL_ALIASES[name]) {
+    return VIRTUAL_ALIASES[name];
   }
-  
-  const unaliased = cleanName.replace(/^infered\//, "");
+
+  const unaliased = name.replace(/^infered\//, "");
   if (MODEL_TIERS[unaliased]) {
     return [unaliased];
   }
-  if (MODEL_TIERS[cleanName]) {
-    return [cleanName];
+  if (MODEL_TIERS[name]) {
+    return [name];
   }
 
   // Unknown names resolve to the default budget chain, not the auto pool —

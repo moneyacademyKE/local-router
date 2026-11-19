@@ -31,6 +31,34 @@
       (is (not-any? #(= "cx/gpt-5.6-sol" %) (:solExact res))
           "removed sol must resolve to a sol-free fallback, never to itself"))))
 
+(deftest test-bare-alias-names-mean-the-same-product
+  (testing "A client that omits the infered/ prefix lands on the same chain, never the default cascade"
+    (let [res (run-node-eval
+               "import { canonicalModelName, resolveVirtualModel, VIRTUAL_ALIASES } from './src/router/catalog.js';
+                console.log(JSON.stringify({
+                  autoCanonical: canonicalModelName('auto'),
+                  autoBare: resolveVirtualModel('auto'),
+                  autoPrefixed: resolveVirtualModel('infered/auto'),
+                  glmBare: resolveVirtualModel('glm-budget'),
+                  glmPrefixed: resolveVirtualModel('infered/glm-budget'),
+                  rawId: canonicalModelName('grok/grok-4.7'),
+                  rawResolved: resolveVirtualModel('grok/grok-4.7'),
+                  unknown: canonicalModelName('zai/nonexistent'),
+                  unknownResolved: resolveVirtualModel('zai/nonexistent'),
+                  defaultChain: VIRTUAL_ALIASES['infered/glm-budget']
+                }));")]
+      (is (= "infered/auto" (:autoCanonical res)))
+      (is (= (:autoPrefixed res) (:autoBare res))
+          "bare 'auto' must resolve to the measured auto pool, not the default cascade")
+      (is (not= (:autoBare res) (:defaultChain res))
+          "the auto pool and the default glm-budget cascade are different products")
+      (is (= (:glmPrefixed res) (:glmBare res)))
+      (is (= "grok/grok-4.7" (:rawId res)) "raw model ids are untouched")
+      (is (= ["grok/grok-4.7"] (:rawResolved res)))
+      (is (= "zai/nonexistent" (:unknown res)))
+      (is (= (:defaultChain res) (:unknownResolved res))
+          "an unknown name still behaves exactly like no model at all"))))
+
 (deftest test-official-pricing
   (testing "Official pricing provides baseline for all models including 2026 frontier models"
     (let [res (run-node-eval

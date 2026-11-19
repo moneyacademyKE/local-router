@@ -1,6 +1,6 @@
 /** Infered — dynamic virtual LLM router for the InferHub spot marketplace. */
 
-import { VIRTUAL_ALIASES, CASCADE_CHAINS, resolveStrongLink } from "./router/catalog.js";
+import { VIRTUAL_ALIASES, CASCADE_CHAINS, resolveStrongLink, canonicalModelName } from "./router/catalog.js";
 import { createPriceCache, updateSpotPrices, calculateSavingsPct, ingestInferHubModelsResponse, buildRatecard, getQuotesForModel, getMarketState } from "./router/pricing.js";
 import { createMetricsStore, getProviderStats, getUsageSummary } from "./router/metrics.js";
 import { createCacheStore, computeRequestKey, getCachedResponse, putCachedResponse } from "./router/cache.js";
@@ -287,7 +287,9 @@ export default {
         }
         const requestStart = Date.now();
         // Sol removed 2026-09-05 (owner directive) — glm-budget is the default chain.
-        const requestedModel = requestBody.model || "infered/glm-budget";
+        // Bare alias names ("auto", "glm-budget") are the same products as their
+        // infered/ form; canonicalise before anything compares the string.
+        const requestedModel = canonicalModelName(requestBody.model) || "infered/glm-budget";
         const { weights, maxFallbackPrice } = parseWeightsAndBudget(request, requestBody, env, url);
         let autoSnapshot = null;
         if (requestedModel === AUTO_MODEL) {
