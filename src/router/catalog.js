@@ -3,7 +3,7 @@
  * Pure data structures and resolution logic for Infered router.
  */
 
-import { AUTO_MODELS } from "./auto.js";
+import { AUTO_CHAIN } from "./auto.js";
 
 // Model capabilities and quality benchmarks (normalized 0.0 - 1.0).
 // Slimmed 2026-09-05 (owner directive): chain members plus owner-designated
@@ -22,7 +22,17 @@ export const MODEL_TIERS = {
   // Market's top score (AA 60.0) under the seller-quota rule 2026-11-11: the
   // feed gives it 1M context and a two-ask book ($0.01/$0.50 out) that
   // saturates hard — measured quota health demotes it while sellers are out.
-  "ag/gemini-4-carbon": { tier: "frontier-flagship", quality: 0.97, family: "google", context: 1048576 }
+  "ag/gemini-4-carbon": { tier: "frontier-flagship", quality: 0.97, family: "google", context: 1048576 },
+  // Owner-declared auto chain 2026-11-21. Context windows are the live feed's
+  // input_token_limit (272K / 500K / 1M). Quality is the router's unknown-model
+  // default, NOT a measurement: no intelligence snapshot exists for the 6.2
+  // generation yet, and the auto chain no longer ranks by quality — membership
+  // and order are declared, so inventing scores here would only feed a report a
+  // belief. These entries exist so a RAW request for these ids resolves to
+  // itself instead of silently rerouting to the default budget chain.
+  "cx/gpt-6.2-astra": { tier: "frontier-flagship", quality: 0.70, family: "openai", context: 272000, unmeasuredQuality: true },
+  "cx/gpt-6.2-sol": { tier: "frontier-flagship", quality: 0.70, family: "openai", context: 500000, unmeasuredQuality: true },
+  "ali/qwen4-max": { tier: "moe-frontier", quality: 0.70, family: "qwen", context: 1000000, unmeasuredQuality: true }
 };
 
 // Official provider list prices in USD per 1M tokens [Prompt, Completion]
@@ -42,7 +52,14 @@ export const OFFICIAL_PRICES = {
   "grok/grok-4.7": { prompt: 2, completion: 6 },
   // Carbon joined the auto pool 2026-11-11 (owner directive). List price per
   // the live feed (official_in/out, verified this turn).
-  "ag/gemini-4-carbon": { prompt: 2, completion: 10 }
+  "ag/gemini-4-carbon": { prompt: 2, completion: 10 },
+  // Owner-declared auto chain 2026-11-21: official_in/out straight from the
+  // live market feed (8/40, 2/10, 1.5/4.5 per 1M). These are LIST prices, used
+  // for savings comparison only — the spot asks in the hourly snapshot decide
+  // what is actually buyable inside the $1.00 output bid.
+  "cx/gpt-6.2-astra": { prompt: 8, completion: 40 },
+  "cx/gpt-6.2-sol": { prompt: 2, completion: 10 },
+  "ali/qwen4-max": { prompt: 1.5, completion: 4.5 }
 };
 
 // Budget cascade ordering: ali/glm-5.3 leads, followed by grok, kimi, and terra.
@@ -104,8 +121,9 @@ export const CASCADE_CHAINS = {
   "infered/terra-kimi": TERRA_KIMI_CHAIN,
   "infered/kimi-glm": KIMI_GLM_CHAIN,
   "infered/solterra": SOLTERRA_CHAIN,
-  // Static universe only; actual members come from the hourly market snapshot.
-  "infered/auto": AUTO_MODELS.map(m => m.id)
+  // Declared membership in declared order (owner directive 2026-11-21); the
+  // hourly market snapshot supplies each member's live asks.
+  "infered/auto": [...AUTO_CHAIN]
 };
 
 // Default requested model — also where UNRECOGNIZED names land (typos like

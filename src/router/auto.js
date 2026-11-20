@@ -1,6 +1,8 @@
-/** Market snapshot for the owner-selected intelligence-ranked chain, rebuilt
- * on a 30-minute heartbeat (owner rule 2026-11-11).
- * Availability is a ranking weight (owner rule 2026-11-11): a model's real price
+/** Market snapshot for the owner-declared auto chain, rebuilt on a 30-minute
+ * heartbeat (owner rule 2026-11-11). Membership and sequence come from
+ * AUTO_CHAIN (owner directive 2026-11-21); measured health annotates each
+ * member but never reorders it.
+ * Availability is a price weight (owner rule 2026-11-11): a model's real price
  * is what several sellers can sustain inside the output bid, not what one lone
  * ask advertises. A book with a single in-cap seller is admitted but flagged
  * thinBook (2026-11-18) — depth orders the chain, it does not ban supply. */
@@ -31,28 +33,30 @@ export const AUTO_MAX_HEARTBEAT_MS = 35 * 60 * 1000;
 export const CACHE_HIT_RATE = 0.5;
 export const CACHE_TOKEN_COST = 0.1;
 
-// Scores are the Artificial Analysis snapshot from 2026-11-10, not live scores.
-// Equal-score listings are ordered by in-cap seller depth (availability), then
-// cache-adjusted blended price (25% effective input + 75% sustained in-cap
-// output) — never by a single seller's cheapest ask.
-// Try order is MEASURED, not hand-set (owner directive 2026-11-18): the served
-// order comes from applyValueRanking (score × reliability × speed ÷ cost),
-// where reliability and speed are the model's own attempt ledger. A hand-set
-// priority was the previous mechanism and had to be re-edited every time
-// upstream capacity moved — it encoded a belief, not a measurement.
-// 2026-11-11: grok-4.7 joined the pool; Argon remains explicitly excluded.
-export const AUTO_MODELS = [
-  { id: "grok/grok-4.7", score: 35.5 },
-  { id: "ag/gemini-4-carbon", score: 60 },
-  { id: "cx/gpt-6-astra", score: 57 },
-  { id: "oai/gpt-6.1-sol", score: 55 },
-  { id: "cx/gpt-6.1-terra", score: 51 },
-  { id: "oai/gpt-6.1-terra", score: 51 },
-  { id: "ali/kimi-k3.1-pro", score: 46 },
-  { id: "ali/glm-5.3", score: 32 }
+// The auto chain is DECLARED by the owner, in order (owner directive
+// 2026-11-21): these three, attempted in this sequence. The previous pool was
+// a set of Artificial Analysis scores that the value ranking then re-sorted at
+// serve time, which meant the owner could not read the chain he was buying —
+// the order was an inference. A declared order is a decision; the ranking
+// machinery now only ANNOTATES each member (reliability, speed, value tier),
+// it no longer decides membership or sequence.
+//
+// The $1.00/M output bid still applies to every member (AUTO_OUTPUT_BID). A
+// member whose cheapest ask sits above it is excluded with reason `over_cap`
+// and named in diagnostics — silently buying outside the ceiling is the one
+// thing an owner order must never do. Live failure still outranks the order:
+// pareto.js pushes a circuit-tripped member to the back, so a head that is
+// actively failing is skipped rather than retried in the owner's name.
+//
+// Feed check 2026-11-21 (in-cap sellers at the $1.00 bid): astra 6.2 from
+// $0.24 (3), sol 6.2 from $0.19 (9), qwen4-max from $0.27 (3).
+export const AUTO_CHAIN = [
+  "cx/gpt-6.2-astra",
+  "cx/gpt-6.2-sol",
+  "ali/qwen4-max"
 ];
 
-const AUTO_MODEL_IDS = new Set(AUTO_MODELS.map(model => model.id));
+const AUTO_MODEL_IDS = new Set(AUTO_CHAIN);
 
 export function isAutoEligibleModel(modelId) {
   return AUTO_MODEL_IDS.has(modelId);
@@ -88,7 +92,7 @@ export function buildAutoSnapshot(feed, now = Date.now()) {
   const entries = new Map(feed.data.map(m => [m.id, m]));
   const models = [];
   const excluded = [];
-  for (const { id, score } of AUTO_MODELS) {
+  for (const id of AUTO_CHAIN) {
     const entry = entries.get(id);
     const pricing = entry?.pricing;
     if (!pricing) { excluded.push({ modelId: id, reason: "not_in_feed" }); continue; }
@@ -118,16 +122,14 @@ export function buildAutoSnapshot(feed, now = Date.now()) {
       : prompt;
     const depthPrice = inCap[inCap.length - 1];
     const effectiveBlended = Number(((0.25 * effectiveInput) + (0.75 * depthPrice)).toFixed(6));
-    models.push({ modelId: id, score, prompt, completion: asks[0],
+    models.push({ modelId: id, prompt, completion: asks[0],
       askCount: asks.length, inCapDepth: inCap.length, depthPrice, thinBook,
       supportsCache, effectiveInput, effectiveBlended });
   }
-  // Build-time order is capability-led; the served order is the measured value
-  // order applied by applyValueRanking (see ./health.js). Keeping this sort
-  // deterministic means a cold D1 still serves a sensible chain.
-  models.sort((a, b) => b.score - a.score ||
-    b.inCapDepth - a.inCapDepth || a.effectiveBlended - b.effectiveBlended ||
-    a.modelId.localeCompare(b.modelId));
+  // Declared order IS the served order — no build-time sort, no score-led
+  // reshuffle. applyValueRanking still annotates every member, but it is told
+  // not to reorder (see withValueOrder), so a cold D1 and a warm one agree on
+  // the sequence the owner asked for.
   const hour = Math.floor(now / AUTO_HOUR_MS);
   return { hour, refreshedAt: now, nextRefreshAt: (hour + 1) * AUTO_HOUR_MS,
     cache: { hitRate: CACHE_HIT_RATE, tokenCost: CACHE_TOKEN_COST,
@@ -239,13 +241,17 @@ async function withQuotaHealth(snapshot, db, hour) {
   return snapshot;
 }
 
-/** Applies the measured value order: intelligence × reliability × speed ÷ cost.
- * Health older than the heartbeat is re-aggregated by loadHealth; a D1 read
- * failure degrades to the capability-led build order, never to a dead chain. */
+/** Annotates the declared chain with measured health: reliability, speed,
+ * value tier, attempt counts, cooldown. It does NOT reorder — the owner
+ * declared the sequence (2026-11-21), so a model that has been slower or less
+ * reliable still sits where the owner put it and says so in its own fields.
+ * A D1 read failure degrades to the un-annotated build order, never to a dead
+ * chain. Live failure still outranks the order downstream: pareto.js pushes a
+ * circuit-tripped member to the back. */
 async function withValueOrder(snapshot, db, now) {
   try {
     const health = await loadHealth(db, now);
-    return health ? applyValueRanking(snapshot, health) : snapshot;
+    return health ? applyValueRanking(snapshot, health, { reorder: false }) : snapshot;
   } catch { return snapshot; }
 }
 
@@ -285,9 +291,21 @@ export function chainDiagnostics(snapshot, bid = AUTO_OUTPUT_BID) {
   }
   if (cooling.length) warnings.push(`cooling after a recent failure: ${cooling.join(", ")}`);
   if (thin.length) warnings.push(`thin book, one in-cap seller: ${thin.join(", ")}`);
+  // A declared member that the gates dropped is the owner's business, not a
+  // silent omission: name it, and name why, in the same sentence.
+  const servedIds = new Set(models.map(m => m.modelId));
+  const missing = AUTO_CHAIN.filter(id => !servedIds.has(id));
+  if (missing.length) {
+    warnings.push(`declared member absent from the served chain: ${missing.join(", ")}` +
+      (gates ? ` (${gates})` : ""));
+  }
   if (unlock) warnings.push(`raise the output bid to ${unlock.ask} to admit ${unlock.modelId}`);
   const head = models[0] || null;
   return { bid, chainDepth: models.length, gateCounts, thinBook: thin, cooling,
+    // Who decided this sequence: the owner declared it (AUTO_CHAIN). The value
+    // ranking annotates; it does not sort. Said explicitly so a report never
+    // has to infer whether an order was bought or inferred.
+    orderSource: "owner-declared",
     head: head ? { modelId: head.modelId, valueTier: head.valueTier,
       valueScore: head.valueScore, measuredAttempts: head.measuredAttempts } : null,
     unlock, warnings };

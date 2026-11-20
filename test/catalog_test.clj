@@ -247,14 +247,12 @@
   (testing "grok remains wired while the retired Sonnet entry stays absent"
     (let [res (run-node-eval
                "import { resolveVirtualModel, OFFICIAL_PRICES } from './src/router/catalog.js';
-                import { AUTO_MODELS } from './src/router/auto.js';
+                import { AUTO_CHAIN } from './src/router/auto.js';
                 console.log(JSON.stringify({
                   glmBudget: resolveVirtualModel('infered/glm-budget'),
                   grokPrice: OFFICIAL_PRICES['grok/grok-4.7'],
                   sonnetPrice: OFFICIAL_PRICES['ag/claude-sonnet-' + '4-6'],
-                  poolIds: AUTO_MODELS.map(m => m.id),
-                  grokScore: AUTO_MODELS.find(m => m.id === 'grok/grok-4.7')?.score,
-                  sonnetScore: AUTO_MODELS.find(m => m.id === 'ag/claude-sonnet-' + '4-6')?.score
+                  poolIds: AUTO_CHAIN
                 }));")]
       (is (some #{"grok/grok-4.7"} (:glmBudget res))
           "grok-4.7 is a glm-budget chain member (owner directive 2026-11-11)")
@@ -263,10 +261,10 @@
           "grok official list 2/6 per the live feed")
       (is (nil? (:sonnetPrice res))
           "retired sonnet has no official price entry")
-      (is (some #{"grok/grok-4.7"} (:poolIds res)) "grok is in the auto pool")
-      (is (not-any? #(= (str "ag/claude-sonnet-" "4-6") %) (:poolIds res)) "retired sonnet is absent from the auto pool")
+      (is (= ["cx/gpt-6.2-astra" "cx/gpt-6.2-sol" "ali/qwen4-max"] (:poolIds res))
+          "the auto chain is the owner-declared three, in the declared sequence")
+      (is (not-any? #(= (str "ag/" "4-6") %) (:poolIds res)) "retired sonnet is absent from the auto chain")
+      (is (not-any? #{"grok/grok-4.7"} (:poolIds res))
+          "grok left the auto chain when the owner declared the three (2026-11-21)")
       (is (not-any? #{"ag/gemini-4-argon"} (:poolIds res))
-          "gemini-4-argon stays OUT of the pool (owner directive 2026-11-11: do not add argon)")
-      (is (= 35.5 (:grokScore res)) "grok carries its AA snapshot score")
-      (is (nil? (:sonnetScore res)) "retired sonnet has no auto score"))))
-
+          "gemini-4-argon stays OUT of the pool (owner directive 2026-11-11: do not add argon)"))))

@@ -25,7 +25,13 @@ const MODEL_SPOT_MULTIPLIERS = {
   "oai/gpt-6.1-sol": [0.0170, 0.0180, 0.0200],     // $10.00 * 0.017 = $0.17 (feed min ask)
   "oai/gpt-6.1-terra": [0.0170, 0.0180, 0.0200],   // $5.00 * 0.017 = $0.085 (feed min ask)
   "grok/grok-4.7": [0.0010, 0.0050, 0.0190],      // $6.00 * 0.001 = $0.006 (feed min ask, 13 asks, 8 in-cap)
-  "ag/gemini-4-carbon": [0.0010, 0.0050, 0.0500]  // $10.00 * 0.001 = $0.01 (feed min ask, quota-probed)
+  "ag/gemini-4-carbon": [0.0010, 0.0050, 0.0500],  // $10.00 * 0.001 = $0.01 (feed min ask, quota-probed)
+  // Owner-declared auto chain 2026-11-21: ratios derived from the live book's
+  // first three completion asks over the official list price — the same
+  // derivation as the rows above, no invented calibration.
+  "cx/gpt-6.2-astra": [0.0060, 0.0200, 0.0210],    // $40.00 * 0.006 = $0.24 (feed min ask, 3 in-cap)
+  "cx/gpt-6.2-sol": [0.0190, 0.0200, 0.0450],      // $10.00 * 0.019 = $0.19 (feed min ask, 9 in-cap)
+  "ali/qwen4-max": [0.0600, 0.0950, 0.1920]        // $4.50 * 0.06 = $0.27 (feed min ask, 3 in-cap)
 };
 
 export function createDefaultMarketQuotes() {

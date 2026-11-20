@@ -202,8 +202,14 @@ export async function loadHealth(db, now = Date.now()) {
  * The tiers exist so a new model still gets a chance once the proven members
  * are exhausted, without letting an untested model jump a measured workhorse.
  * A single failure never lands a model in "disproven" — evidence floor first.
+ *
+ * `reorder` (owner directive 2026-11-21): the auto chain's membership AND
+ * sequence are declared, so health annotates its members without re-sorting
+ * them. The tiers still describe each member honestly (a cooling model still
+ * says so); they just no longer decide who is first. Callers that own a
+ * measured ordering — the cascade products — keep the default `reorder: true`.
  */
-export function applyValueRanking(snapshot, health) {
+export function applyValueRanking(snapshot, health, { reorder = true } = {}) {
   const models = Array.isArray(snapshot?.models) ? snapshot.models : [];
   if (!models.length) return snapshot;
   const fleetRate = Number.isFinite(health?.fleet?.rate) ? health.fleet.rate : null;
@@ -228,13 +234,16 @@ export function applyValueRanking(snapshot, health) {
       speed = ok > 0 && Number.isFinite(fastest) && Number.isFinite(h.avgMs) && h.avgMs > 0
         ? Math.min(1, fastest / h.avgMs) : 0;
     }
-    const score = Number.isFinite(m.score) ? m.score : 0;
+    // A declared member carries no intelligence score: valueScore is then
+    // UNKNOWN (null), not zero. Zero is a measurement ("worth nothing per
+    // dollar"); null is the absence of one, and the two must not read alike.
+    const score = Number.isFinite(m.score) ? m.score : null;
     const thin = Number(m.inCapDepth) === 1;
     const cooling = Boolean(h) && Number.isFinite(h.lastFailAt) &&
       !(Number.isFinite(h.lastOkAt) && h.lastOkAt > h.lastFailAt) &&
       ref - h.lastFailAt < HEALTH_COOLDOWN_MS;
     return { ...m, thinBook: thin, reliability: round(reliability), speed: round(speed),
-      valueScore: round((score * reliability * speed) / cost),
+      valueScore: score === null ? null : round((score * reliability * speed) / cost),
       measuredAttempts: attempts, cooling,
       valueTier: attempts === 0 ? "unproven"
         : cooling ? "cooling"
@@ -242,11 +251,13 @@ export function applyValueRanking(snapshot, health) {
             : (attempts >= HEALTH_MIN_ATTEMPTS ? "disproven" : "unproven") };
   });
   const tierRank = { proven: 0, thin: 1, unproven: 2, cooling: 3, disproven: 4 };
-  ranked.sort((a, b) => tierRank[a.valueTier] - tierRank[b.valueTier] ||
-    (b.valueScore ?? -1) - (a.valueScore ?? -1) ||
-    (b.score ?? 0) - (a.score ?? 0) ||
-    (a.effectiveBlended ?? 0) - (b.effectiveBlended ?? 0) ||
-    String(a.modelId).localeCompare(String(b.modelId)));
+  if (reorder) {
+    ranked.sort((a, b) => tierRank[a.valueTier] - tierRank[b.valueTier] ||
+      (b.valueScore ?? -1) - (a.valueScore ?? -1) ||
+      (b.score ?? 0) - (a.score ?? 0) ||
+      (a.effectiveBlended ?? 0) - (b.effectiveBlended ?? 0) ||
+      String(a.modelId).localeCompare(String(b.modelId)));
+  }
   return { ...snapshot, health: { windowHours: health?.windowHours ?? null,
     fleetRate, fastestMs: health?.fleet?.fastestMs ?? null,
     computedAt: health?.computedAt ?? null, cooldownMs: HEALTH_COOLDOWN_MS,

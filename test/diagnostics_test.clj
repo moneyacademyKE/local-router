@@ -92,28 +92,28 @@
                    const now = 3600000 * 100;
                    const hour = Math.floor(now / 3600000);
                    const payload = {models: [
-                     {modelId: 'grok/grok-4.7', score: 50, effectiveBlended: 0.5, bid: 1},
-                     {modelId: 'cx/gpt-6.1-terra', score: 40, effectiveBlended: 0.4, bid: 1, thinBook: true}
+                     {modelId: 'cx/gpt-6.2-astra', score: 50, effectiveBlended: 0.5, bid: 1},
+                     {modelId: 'cx/gpt-6.2-sol', score: 40, effectiveBlended: 0.4, bid: 1, thinBook: true}
                    ]};
                    const db = mkDb({
                      'SELECT hour, payload FROM auto_chain_snapshot': {first: {hour, payload: JSON.stringify(payload)}},
                      'SELECT payload FROM auto_chain_snapshot': {first: {payload: JSON.stringify({
                        computedAt: now, windowHours: 24,
                        fleet: {ok: 20, fail: 2, rate: 0.909, fastestMs: 900},
-                       models: {'grok/grok-4.7': {ok: 18, fail: 0, avgMs: 900},
-                                'cx/gpt-6.1-terra': {ok: 2, fail: 0, avgMs: 1800}}
+                       models: {'cx/gpt-6.2-astra': {ok: 18, fail: 0, avgMs: 900},
+                                'cx/gpt-6.2-sol': {ok: 2, fail: 0, avgMs: 1800}}
                      })}},
                      'FROM routing_attempts': {all: []}
                    });
                    const out = await buildDiagnostics({ROUTING_DB: db, INFERHUB_API_KEY: 'k'}, db, now);
                    console.log(JSON.stringify(out));"))]
-    (is (= ["grok/grok-4.7" "cx/gpt-6.1-terra"] (get-in res [:chain :order]))
-        "declared members are admitted in value order, thin book included")
+    (is (= ["cx/gpt-6.2-astra" "cx/gpt-6.2-sol"] (get-in res [:chain :order]))
+        "declared members are served in the owner's order, thin book included")
     (is (false? (get-in res [:chain :stale]))
         "the chain window is judged against the same clock as the payload timestamp")
     (is (contains? (get-in res [:chain :diagnostics]) :warnings)
         "the chain diagnostics block rides along, so /v1/diagnostics is self-contained")
-    (is (= "grok/grok-4.7" (get-in res [:chain :models 0 :modelId]))
+    (is (= "cx/gpt-6.2-astra" (get-in res [:chain :models 0 :modelId]))
         "the full model rows ship too — the caller should not need a second call")))
 
 (deftest circuit-tripped-members-move-to-the-back-of-the-attempt-order

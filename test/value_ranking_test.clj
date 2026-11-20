@@ -245,3 +245,42 @@
     (is (true? (get-in res [:thin :thinBook])))
     (is (> (get-in res [:thin :valueScore]) (get-in res [:deep :valueScore]))
         "the thin book's measured value is not falsified to justify the order — the tier carries the supply risk")))
+
+(deftest reorder-false-annotates-the-declared-order-without-sorting-it
+  ;; The auto chain's sequence is the owner's (2026-11-21). With reorder:false
+  ;; the ranking still measures every member — reliability, speed, tier,
+  ;; cooling — but the members come back exactly where they were put.
+  (let [res (run-node-eval
+             "import { applyValueRanking } from './src/router/health.js';
+              const snapshot = {models: [
+                {modelId: 'declared/slow', score: null, effectiveBlended: 0.9},
+                {modelId: 'declared/fast', score: null, effectiveBlended: 0.1},
+                {modelId: 'declared/dead', score: null, effectiveBlended: 0.5}
+              ]};
+              const health = {windowHours: 24, computedAt: 1700000600000,
+                fleet: {ok: 90, fail: 10, rate: 0.9, fastestMs: 2000},
+                models: {
+                  'declared/slow': {ok: 40, fail: 4, avgMs: 8000, lastOkAt: 1700000500000, lastFailAt: null},
+                  'declared/fast': {ok: 40, fail: 4, avgMs: 2000, lastOkAt: 1700000500000, lastFailAt: null},
+                  'declared/dead': {ok: 0, fail: 20, avgMs: null, lastOkAt: null, lastFailAt: 1700000550000}
+                }};
+              const kept = applyValueRanking(snapshot, health, { reorder: false });
+              const sorted = applyValueRanking(snapshot, health);
+              const pick = (s, id) => s.models.filter(m => m.modelId === id)[0];
+              console.log(JSON.stringify({
+                keptOrder: kept.models.map(m => m.modelId),
+                sortedOrder: sorted.models.map(m => m.modelId),
+                slow: pick(kept, 'declared/slow'),
+                dead: pick(kept, 'declared/dead')
+              }));")]
+    (is (= ["declared/slow" "declared/fast" "declared/dead"] (:keptOrder res))
+        "reorder:false returns the caller's sequence untouched, even when the last member is the worst measured one")
+    (is (= ["declared/fast" "declared/slow" "declared/dead"] (:sortedOrder res))
+        "the default still sorts — the cascade products keep their measured order")
+    (is (= {:reliability 0.907 :speed 0.25 :valueTier "proven"}
+           (select-keys (:slow res) [:reliability :speed :valueTier]))
+        "an annotated member still says how slow it is: 2000/8000 = 0.25 speed, reliability (40+10*0.9)/54 = 0.907")
+    (is (nil? (get-in res [:slow :valueScore]))
+        "a declared member has no intelligence score, so valueScore is null (unknown), never 0 (worthless)")
+    (is (= "cooling" (get-in res [:dead :valueTier]))
+        "a member that failed most recently is still labelled cooling where the owner put it")))
