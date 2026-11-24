@@ -62,8 +62,11 @@ export const OFFICIAL_PRICES = {
   "ali/qwen4-max": { prompt: 1.5, completion: 4.5 }
 };
 
-// Budget cascade ordering: ali/glm-5.3 leads, followed by grok, kimi, and terra.
+// Budget cascade ordering: zai/glm-5.4 leads (owner directive 2026-11-24),
+// then glm-5.3, grok, kimi, and terra. The head is skipped, not fatal, when
+// no seller quotes it yet (eligibility skips unquoted models).
 export const GLM_BUDGET_FALLBACK_CHAIN = [
+  "zai/glm-5.4",
   "ali/glm-5.3",
   "grok/grok-4.7",
   "ali/kimi-k3.1-pro",

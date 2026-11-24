@@ -34,7 +34,8 @@ export const CACHE_HIT_RATE = 0.5;
 export const CACHE_TOKEN_COST = 0.1;
 
 // The auto chain is DECLARED by the owner, in order (owner directive
-// 2026-11-21): these three, attempted in this sequence. The previous pool was
+// 2026-11-21): these three, attempted in this sequence. Appended last by
+// owner directive 2026-11-24: zai/glm-5.4 as the tail member. The previous pool was
 // a set of Artificial Analysis scores that the value ranking then re-sorted at
 // serve time, which meant the owner could not read the chain he was buying —
 // the order was an inference. A declared order is a decision; the ranking
@@ -53,7 +54,12 @@ export const CACHE_TOKEN_COST = 0.1;
 export const AUTO_CHAIN = [
   "cx/gpt-6.2-astra",
   "cx/gpt-6.2-sol",
-  "ali/qwen4-max"
+  "ali/qwen4-max",
+  // Tail member, appended by owner directive 2026-11-24. No feed check has
+  // been recorded for it yet; the $1.00/M output bid adjudicates it like any
+  // other member — an over-cap ask names it over_cap in diagnostics rather
+  // than buying silently.
+  "zai/glm-5.4"
 ];
 
 const AUTO_MODEL_IDS = new Set(AUTO_CHAIN);

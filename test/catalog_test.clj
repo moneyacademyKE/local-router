@@ -26,7 +26,7 @@
       (is (vector? (:autoModels res)))
       (is (> (count (:autoModels res)) 0))
       ;; Sol and the retired tail are absent; the surviving four-model chain is canonical.
-      (is (= ["ali/glm-5.3", "grok/grok-4.7", "ali/kimi-k3.1-pro", "cx/gpt-6.1-terra"]
+      (is (= ["zai/glm-5.4", "ali/glm-5.3", "grok/grok-4.7", "ali/kimi-k3.1-pro", "cx/gpt-6.1-terra"]
              (:cascadeModels res)))
       (is (not-any? #(= "cx/gpt-5.6-sol" %) (:solExact res))
           "removed sol must resolve to a sol-free fallback, never to itself"))))
@@ -96,7 +96,7 @@
                   cascadeLookup: Boolean(CASCADE_CHAINS['infered/glm-budget']),
                   solBudgetStillReroutes: resolveVirtualModel('infered/sol-budget')
                 }));")]
-      (is (= ["ali/glm-5.3", "grok/grok-4.7", "ali/kimi-k3.1-pro", "cx/gpt-6.1-terra"]
+      (is (= ["zai/glm-5.4", "ali/glm-5.3", "grok/grok-4.7", "ali/kimi-k3.1-pro", "cx/gpt-6.1-terra"]
              (:glmBudgetModels res)))
       (is (not-any? #(= "cx/gpt-5.6-sol" %) (:glmBudgetModels res))
           "glm-budget must never include sol")
@@ -106,7 +106,7 @@
       (is (:cascadeLookup res) "must be a registered cascade chain")
       ;; slimmed 2026-09-05: sol names left the listing but old callers still
       ;; reroute to the glm-budget chain instead of erroring
-      (is (= ["ali/glm-5.3", "grok/grok-4.7", "ali/kimi-k3.1-pro", "cx/gpt-6.1-terra"]
+      (is (= ["zai/glm-5.4", "ali/glm-5.3", "grok/grok-4.7", "ali/kimi-k3.1-pro", "cx/gpt-6.1-terra"]
              (:solBudgetStillReroutes res))
           "legacy sol-budget callers reroute to the glm-budget chain (flash-free since 2026-11-09)"))))
 
@@ -145,7 +145,7 @@
                   chainMemberDirect: resolveVirtualModel('cx/gpt-6.1-terra')
                 }));")]
       ;; bind-order note: the default chain is glm-budget's four-model cascade
-      (is (= ["ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra"]
+      (is (= ["zai/glm-5.4" "ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra"]
              (:gm53Typo res))
           "the famous gm5.3 typo must land on the budget chain")
       (is (not-any? #(= "cx/gpt-5.6-sol" %) (:rawSol res))
@@ -154,13 +154,13 @@
           "removed pinned virtuals reroute to the budget chain")
       (is (= ["cx/gpt-6.1-terra"] (:chainMemberDirect res))
           "current chain members stay directly addressable (they are the chains)")
-      (is (= ["ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra"]
+      (is (= ["zai/glm-5.4" "ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra"]
              (:removedFlash res))
           "excised flash falls to the default chain (never 403-chases the dead pool)")
-      (is (= ["ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra"]
+      (is (= ["zai/glm-5.4" "ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra"]
              (:removedTerra res))
           "excised terra-5.6 falls to the default chain")
-      (is (= ["ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra"]
+      (is (= ["zai/glm-5.4" "ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra"]
              (:removedKimi res))
           "excised kimi-k3 falls to the default chain"))))
 
@@ -214,7 +214,7 @@
                 }))));")]
       (is (every? #(not (:hasTier %)) res))
       (is (every? #(not (:hasPrice %)) res))
-      (is (every? #(= ["ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra"] (:resolved %)) res))
+      (is (every? #(= ["zai/glm-5.4" "ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra"] (:resolved %)) res))
       (is (every? #(= {:prompt 1 :completion 2} (:price %)) res))
       (is (every? #(= "general" (get-in % [:tier :tier])) res)))))
 
@@ -256,13 +256,13 @@
                 }));")]
       (is (some #{"grok/grok-4.7"} (:glmBudget res))
           "grok-4.7 is a glm-budget chain member (owner directive 2026-11-11)")
-      (is (= 4 (count (:glmBudget res))) "glm-budget is the surviving four-model cascade")
+      (is (= 5 (count (:glmBudget res))) "glm-budget is the surviving five-model cascade")
       (is (= {:prompt 2 :completion 6} (:grokPrice res))
           "grok official list 2/6 per the live feed")
       (is (nil? (:sonnetPrice res))
           "retired sonnet has no official price entry")
-      (is (= ["cx/gpt-6.2-astra" "cx/gpt-6.2-sol" "ali/qwen4-max"] (:poolIds res))
-          "the auto chain is the owner-declared three, in the declared sequence")
+      (is (= ["cx/gpt-6.2-astra" "cx/gpt-6.2-sol" "ali/qwen4-max" "zai/glm-5.4"] (:poolIds res))
+          "the auto chain is the owner-declared sequence with glm-5.4 appended last (2026-11-24)")
       (is (not-any? #(= (str "ag/" "4-6") %) (:poolIds res)) "retired sonnet is absent from the auto chain")
       (is (not-any? #{"grok/grok-4.7"} (:poolIds res))
           "grok left the auto chain when the owner declared the three (2026-11-21)")

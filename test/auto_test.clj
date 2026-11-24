@@ -30,9 +30,10 @@
            (select-keys (first (filter #(= "ali/qwen4-max" (:modelId %)) (:models res)))
                         [:askCount :inCapDepth :depthPrice]))
         "members report their ask depth: total asks, in-cap sellers, sustained in-cap price")
-    (is (= [{:modelId "cx/gpt-6.2-astra" :reason "over_cap" :ask 1.01}]
+    (is (= [{:modelId "cx/gpt-6.2-astra" :reason "over_cap" :ask 1.01}
+            {:modelId "zai/glm-5.4" :reason "not_in_feed"}]
            (:excluded res))
-        "an over-cap declared member is excluded WITH its disqualifying ask — never bought quietly outside the ceiling")
+        "an over-cap declared member is excluded WITH its disqualifying ask — never bought quietly outside the ceiling; a declared member the feed does not quote is named too (owner directive 2026-11-24)")
     (is (not-any? #(= "unranked/model" (:modelId %)) (:models res))
         "the pool is the declared chain, not the whole market feed")))
 
