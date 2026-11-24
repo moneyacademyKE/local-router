@@ -17,5 +17,5 @@
         (is (= 42590 (:latency_ms row)) "ledger reports full request time, not just final attempt")
         (if (= scenario "failure")
           (do (is (= 503 status)) (is (= 0 (:ok row))) (is (= "unserved" (:selected_model row))))
-          (do (is (= 200 status)) (is (= 1 (:ok row))) (is (= "cx/gpt-6.2-sol" (:selected_model row)))))
+          (do (is (= 200 status)) (is (= 1 (:ok row))) (is (= "ali/qwen4-max" (:selected_model row)))))
         (when (= scenario "stream") (is hasDone))))))

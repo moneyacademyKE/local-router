@@ -18,12 +18,12 @@
               };}};}};
               globalThis.fetch=async (url, opts) => {
                 if (url.endsWith('/models')) {feedCalls++; return new Response(JSON.stringify({data:[
-                  {id:'cx/gpt-6.2-astra',supports_cache:true,pricing:{asks_in:[0.1],asks_out:[0.5, 0.55]}},
-                  {id:'cx/gpt-6.2-sol',pricing:{asks_in:[0.01],asks_out:[0.03, 0.04]}}
+                  {id:'cx/gpt-6.2-sol',supports_cache:true,pricing:{asks_in:[0.1],asks_out:[0.5, 0.55]}},
+                  {id:'ali/qwen4-max',pricing:{asks_in:[0.01],asks_out:[0.03, 0.04]}}
                 ]}),{status:200});}
                 const body=JSON.parse(opts.body);
                 sent.push({model:body.model,bid:opts.headers['x-max-output-price'],provider:opts.headers['X-InferHub-Provider']||null});
-                if (body.model==='cx/gpt-6.2-astra') return new Response('price moved',{status:402});
+                if (body.model==='cx/gpt-6.2-sol') return new Response('price moved',{status:402});
                 const answer={choices:[{index:0,delta:{content:'safe fallback'},finish_reason:'stop'}]};
                 return new Response('data: '+JSON.stringify(answer)+'\\n\\ndata: [DONE]\\n\\n',
                   {status:200,headers:{'Content-Type':'text/event-stream'}});
@@ -42,18 +42,18 @@
                   supportsCache:m.supportsCache,effectiveInput:m.effectiveInput}))}));")]
     (is (= 200 (:status res)))
     (is (.contains (:body res) "safe fallback"))
-    (is (= ["cx/gpt-6.2-astra" "cx/gpt-6.2-sol"] (mapv :model (:sent res)))
+    (is (= ["cx/gpt-6.2-sol" "ali/qwen4-max"] (mapv :model (:sent res)))
         "the leading member fails, so the chain falls to the next under the same bid")
     (is (every? #(= "1" (:bid %)) (:sent res)))
     (is (every? #(nil? (:provider %)) (:sent res)) "synthetic node ids are not sent as real upstream sellers")
     (is (= 1 (:feedCalls res)) "the endpoint reads the shared snapshot")
     (is (= 200 (:inspectStatus res)))
-    (is (= [{:id "cx/gpt-6.2-astra" :askCount 2 :inCapDepth 2 :depthPrice 0.55}
-            {:id "cx/gpt-6.2-sol" :askCount 2 :inCapDepth 2 :depthPrice 0.04}]
+    (is (= [{:id "cx/gpt-6.2-sol" :askCount 2 :inCapDepth 2 :depthPrice 0.55}
+            {:id "ali/qwen4-max" :askCount 2 :inCapDepth 2 :depthPrice 0.04}]
            (mapv #(select-keys % [:id :askCount :inCapDepth :depthPrice]) (:snapshot res)))
         "/v1/auto surfaces per-model ask depth: total asks, in-cap sellers, sustained price")
-    (is (= [{:id "cx/gpt-6.2-astra" :supportsCache true :effectiveInput 0.055}
-            {:id "cx/gpt-6.2-sol" :supportsCache false :effectiveInput 0.01}]
+    (is (= [{:id "cx/gpt-6.2-sol" :supportsCache true :effectiveInput 0.055}
+            {:id "ali/qwen4-max" :supportsCache false :effectiveInput 0.01}]
            (mapv #(select-keys % [:id :supportsCache :effectiveInput]) (:snapshot res)))
         "/v1/auto surfaces the cache flag and the cache-adjusted input price")))
 
@@ -110,14 +110,14 @@
               import { buildAutoSnapshot } from './src/router/auto.js';
               const hour = Math.floor(Date.now() / 3600000);
               const market = buildAutoSnapshot({data: [
-                {id: 'cx/gpt-6.2-astra', supports_cache: true, pricing: {asks_in: [0.1], asks_out: [0.24, 0.26]}},
-                {id: 'cx/gpt-6.2-sol', pricing: {asks_in: [0.06], asks_out: [0.19, 0.21]}},
-                {id: 'ali/qwen4-max', pricing: {asks_in: [0.002], asks_out: [0.27, 0.3]}}
+                {id: 'cx/gpt-6.2-sol', supports_cache: true, pricing: {asks_in: [0.1], asks_out: [0.19, 0.21]}},
+                {id: 'ali/qwen4-max', pricing: {asks_in: [0.06], asks_out: [0.27, 0.3]}},
+                {id: 'zai/glm-5.4', pricing: {asks_in: [0.002], asks_out: [0.88, 0.9]}}
               ]}, Date.now());
               const marketRow = {hour, payload: JSON.stringify(market)};
               const quotaRow = {hour, payload: JSON.stringify({hour, probedAt: Date.now(), results: {
-                'cx/gpt-6.2-astra': {status: 'quota', sellersTotal: 2221, sellersOut: 2215, ms: 412},
-                'cx/gpt-6.2-sol': {status: 'ok', ms: 890}
+                'cx/gpt-6.2-sol': {status: 'quota', sellersTotal: 2221, sellersOut: 2215, ms: 412},
+                'ali/qwen4-max': {status: 'ok', ms: 890}
               }})};
               const db={prepare(sql) {return {bind(...args) {return {
                 async first() {return sql.includes('auto-quota') ? quotaRow :
@@ -140,19 +140,19 @@
               const body=await response.text();
               const inspect=await worker.fetch(new Request('https://worker.test/v1/auto'),env,{waitUntil(){}});
               const snapshot=await inspect.json();
-              const astra=snapshot.models.filter(m=>m.modelId==='cx/gpt-6.2-astra')[0]||null;
+              const head=snapshot.models.filter(m=>m.modelId==='cx/gpt-6.2-sol')[0]||null;
               console.log(JSON.stringify({status:response.status,body,sent,
                 order:snapshot.models.map(m=>m.modelId),
-                astraSaturated:astra && astra.saturated,
-                astraQuota:astra && astra.quota,
+                headSaturated:head && head.saturated,
+                headQuota:head && head.quota,
                 stale:snapshot.stale}));")]
     (is (= 200 (:status res)))
     (is (.contains (:body res) "quota-aware serve"))
-    (is (= ["cx/gpt-6.2-sol"] (mapv :model (:sent res)))
-        "the saturated astra head is demoted below available members: the request never even tries it")
+    (is (= ["ali/qwen4-max"] (mapv :model (:sent res)))
+        "the saturated sol head is demoted below available members: the request never even tries it")
     (is (every? #(= "1" (:bid %)) (:sent res)))
-    (is (= ["cx/gpt-6.2-sol" "ali/qwen4-max" "cx/gpt-6.2-astra"] (:order res))
-        "/v1/auto shows the quota-demoted order with the saturated astra last")
-    (is (true? (:astraSaturated res)))
-    (is (= {:status "quota" :sellersTotal 2221 :sellersOut 2215 :ms 412} (:astraQuota res)))
+    (is (= ["ali/qwen4-max" "zai/glm-5.4" "cx/gpt-6.2-sol"] (:order res))
+        "/v1/auto shows the quota-demoted order with the saturated sol last")
+    (is (true? (:headSaturated res)))
+    (is (= {:status "quota" :sellersTotal 2221 :sellersOut 2215 :ms 412} (:headQuota res)))
     (is (false? (:stale res)))))

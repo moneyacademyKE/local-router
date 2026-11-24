@@ -254,6 +254,9 @@
                   sonnetPrice: OFFICIAL_PRICES['ag/claude-sonnet-' + '4-6'],
                   poolIds: AUTO_CHAIN
                 }));")]
+      (is (= ["zai/glm-5.4" "ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra"]
+             (:glmBudget res))
+          "glm-5.4 leads glm-budget and every other member keeps its place (owner directive 2026-11-24)")
       (is (some #{"grok/grok-4.7"} (:glmBudget res))
           "grok-4.7 is a glm-budget chain member (owner directive 2026-11-11)")
       (is (= 5 (count (:glmBudget res))) "glm-budget is the surviving five-model cascade")
@@ -261,8 +264,8 @@
           "grok official list 2/6 per the live feed")
       (is (nil? (:sonnetPrice res))
           "retired sonnet has no official price entry")
-      (is (= ["cx/gpt-6.2-astra" "cx/gpt-6.2-sol" "ali/qwen4-max" "zai/glm-5.4"] (:poolIds res))
-          "the auto chain is the owner-declared sequence with glm-5.4 appended last (2026-11-24)")
+      (is (= ["cx/gpt-6.2-sol" "ali/qwen4-max" "zai/glm-5.4"] (:poolIds res))
+          "the auto chain is the owner-declared sequence: astra removed, glm-5.4 appended last (owner directives 2026-11-24)")
       (is (not-any? #(= (str "ag/" "4-6") %) (:poolIds res)) "retired sonnet is absent from the auto chain")
       (is (not-any? #{"grok/grok-4.7"} (:poolIds res))
           "grok left the auto chain when the owner declared the three (2026-11-21)")

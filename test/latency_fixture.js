@@ -10,8 +10,8 @@ for (const file of ['0001_init.sql', '0002_auto_chain.sql', '0003_usage.sql']) {
 let clock = 1700000000000;
 Date.now = () => clock;
 const models = [
-  { modelId: 'cx/gpt-6.2-astra', prompt: 0.01, completion: 0.1 },
-  { modelId: 'cx/gpt-6.2-sol', prompt: 0.01, completion: 0.1 }
+  { modelId: 'cx/gpt-6.2-sol', prompt: 0.01, completion: 0.1 },
+  { modelId: 'ali/qwen4-max', prompt: 0.01, completion: 0.1 }
 ];
 db.prepare('INSERT INTO auto_chain_snapshot (id, hour, payload) VALUES (?, ?, ?)')
   .run('auto', Math.floor(clock / 3600000), JSON.stringify({ models }));

@@ -13,9 +13,10 @@
              "import { buildAutoSnapshot } from './src/router/auto.js';
               const model = (id, asks) => ({id, pricing: {asks_in: asks.map(x => x/5), asks_out: asks}});
               const feed = {data: [
-                model('cx/gpt-6.2-astra', [1.01, 1.02]),
+                model('cx/gpt-6.2-astra', [0.24, 0.26]),
                 model('cx/gpt-6.2-sol', [0.9, 0.95]),
                 model('ali/qwen4-max', [0.27, 0.5, 0.9]),
+                model('zai/glm-5.4', [1.5]),
                 model('unranked/model', [0.001, 0.002])
               ]};
               const snapshot = buildAutoSnapshot(feed, 7200000);
@@ -24,18 +25,20 @@
     (is (= 10800000 (:nextRefreshAt res)))
     (is (= ["cx/gpt-6.2-sol" "ali/qwen4-max"]
            (mapv :modelId (:models res)))
-        "members are served in the DECLARED order (owner directive 2026-11-21); astra's only asks sit above the bid so it is excluded, not reordered")
+        "members are served in the DECLARED order (owner directives 2026-11-21 and 2026-11-24); glm-5.4's only ask sits above the bid, so it is excluded, not reordered")
     (is (every? #(< (:completion %) 1) (:models res)))
     (is (= {:askCount 3 :inCapDepth 3 :depthPrice 0.9}
            (select-keys (first (filter #(= "ali/qwen4-max" (:modelId %)) (:models res)))
                         [:askCount :inCapDepth :depthPrice]))
         "members report their ask depth: total asks, in-cap sellers, sustained in-cap price")
-    (is (= [{:modelId "cx/gpt-6.2-astra" :reason "over_cap" :ask 1.01}
-            {:modelId "zai/glm-5.4" :reason "not_in_feed"}]
+    (is (= [{:modelId "zai/glm-5.4" :reason "over_cap" :ask 1.5}]
            (:excluded res))
-        "an over-cap declared member is excluded WITH its disqualifying ask — never bought quietly outside the ceiling; a declared member the feed does not quote is named too (owner directive 2026-11-24)")
+        "an over-cap declared member is excluded WITH its disqualifying ask — never bought quietly outside the ceiling")
     (is (not-any? #(= "unranked/model" (:modelId %)) (:models res))
-        "the pool is the declared chain, not the whole market feed")))
+        "the pool is the declared chain, not the whole market feed")
+    (is (not-any? #(= "cx/gpt-6.2-astra" %)
+                  (concat (mapv :modelId (:models res)) (mapv :modelId (:excluded res))))
+        "astra left the chain (owner directive 2026-11-24): quoted cheap and buyable, still neither served nor named — a removed member is not a member")))
 
 (deftest auto-snapshot-refreshes-and-serves-stale-on-feed-failure
   (let [res (run-node-eval
@@ -46,7 +49,7 @@
                 async run() { writes++; if (!row || args[0] >= row.hour) row = {hour:args[0],payload:args[1]}; }
               }; }}; }};
               const feed = async () => { fetches++; return new Response(JSON.stringify({data:[
-                {id:'cx/gpt-6.2-astra',pricing:{asks_in:[0.1],asks_out:[fetches === 1 ? 0.8 : 1.2, fetches === 1 ? 0.85 : 1.3]}},
+                {id:'cx/gpt-6.2-sol',pricing:{asks_in:[0.1],asks_out:[fetches === 1 ? 0.8 : 1.2, fetches === 1 ? 0.85 : 1.3]}},
                 {id:'ali/qwen4-max',pricing:{asks_in:[0.01],asks_out:[0.03, 0.04]}}
               ]}), {status:200}); };
               const env = { ROUTING_DB: db, INFERHUB_API_KEY:'test-key', INFERHUB_BASE_URL:'https://example.test/v1' };
@@ -62,7 +65,7 @@
                 next:next.models.map(x=>x.modelId), nextStale:next.stale,
                 staleModels:stale.models.map(x=>x.modelId), isStale:stale.stale, staleHour:stale.hour,
                 fetches,writes,cold}));")]
-    (is (= ["cx/gpt-6.2-astra" "ali/qwen4-max"] (:first res)))
+    (is (= ["cx/gpt-6.2-sol" "ali/qwen4-max"] (:first res)))
     (is (= (:first res) (:again res)))
     (is (= ["ali/qwen4-max"] (:next res))
         "the next hour's first request refreshes the market snapshot")
@@ -83,6 +86,7 @@
                 {modelId:'ali/qwen3.8-max-' + '0902', prompt:0.01, completion:0.01},
                 {modelId:'ag/claude-sonnet-' + '4-6', prompt:0.01, completion:0.01},
                 {modelId:'ali/glm-5.3', prompt:0.02, completion:0.04},
+                {modelId:'cx/gpt-6.2-astra', prompt:0.02, completion:0.24},
                 {modelId:'cx/gpt-6.2-sol', prompt:0.02, completion:0.04}
               ]})};
               const db = {prepare(sql) { return {bind() { return {
@@ -97,7 +101,7 @@
     (is (= ["cx/gpt-6.2-sol"] (:current res)))
     (is (= ["cx/gpt-6.2-sol"] (:stale res)))
     (is (true? (:isStale res))
-        "current and stale D1 snapshots cannot reintroduce retired auto members: a snapshot written before the 2026-11-21 chain change serves only members the declared chain still names")))
+        "current and stale D1 snapshots cannot reintroduce retired or removed auto members: a snapshot written before a chain change serves only members the declared chain still names — astra included, though it left on 2026-11-24 while still buyable")))
 
 (deftest single-seller-books-are-admitted-and-flagged-thin
   (let [res (run-node-eval
@@ -106,20 +110,21 @@
               const feed = {data: [
                 model('cx/gpt-6.2-astra', [0.24, 5]),
                 model('cx/gpt-6.2-sol', [0.19, 2]),
+                model('zai/glm-5.4', [0.88, 4]),
                 model('ali/qwen4-max', [0.27, 0.3])
               ]};
               const snapshot = buildAutoSnapshot(feed, 7200000);
               console.log(JSON.stringify({snapshot, diagnostics: chainDiagnostics(snapshot)}));")]
     (let [snapshot (:snapshot res)]
-      (is (= ["cx/gpt-6.2-astra" "cx/gpt-6.2-sol" "ali/qwen4-max"]
+      (is (= ["cx/gpt-6.2-sol" "ali/qwen4-max" "zai/glm-5.4"]
              (mapv :modelId (:models snapshot)))
           "a lone in-cap ask is a real price the router can buy: the model stays in the chain, in declared order")
-      (is (= [true true false] (mapv :thinBook (:models snapshot)))
+      (is (= [true false true] (mapv :thinBook (:models snapshot)))
           "one-seller books are flagged thin so the report can name them")
-      (is (= [1 1 2] (mapv :inCapDepth (:models snapshot))))
+      (is (= [1 2 1] (mapv :inCapDepth (:models snapshot))))
       (is (empty? (filter #(= "bait_priced" (:reason %)) (:excluded snapshot)))
           "no member is excluded for a thin book — supply is never banned on a belief"))
-    (is (= ["cx/gpt-6.2-astra" "cx/gpt-6.2-sol"] (get-in res [:diagnostics :thinBook])))
+    (is (= ["cx/gpt-6.2-sol" "zai/glm-5.4"] (get-in res [:diagnostics :thinBook])))
     (is (some #(re-find #"thin book" %) (get-in res [:diagnostics :warnings]))
         "the diagnostics name the thin books instead of silently shrinking the chain")))
 
@@ -130,8 +135,9 @@
               import { createMetricsStore } from './src/router/metrics.js';
               const snap = {models:[
                 {modelId:'cx/gpt-6.2-astra',prompt:0.1,completion:1,score:57},
-                {modelId:'cx/gpt-6.2-sol',prompt:0.1,completion:0.9,score:55},
-                {modelId:'ali/qwen4-max',prompt:0.01,completion:0.1,score:32}
+                {modelId:'cx/gpt-6.2-sol',prompt:0.1,completion:1,score:55},
+                {modelId:'ali/qwen4-max',prompt:0.01,completion:0.1,score:32},
+                {modelId:'zai/glm-5.4',prompt:0.1,completion:0.9,score:50}
               ]};
               const rank = (cap) => rankCandidates({model:'infered/auto',autoSnapshot:snap,
                 priceCache:createPriceCache(),metricsStore:createMetricsStore(),maxFallbackPrice:cap,
@@ -139,8 +145,8 @@
               console.log(JSON.stringify({normal:rank(null).map(c=>({id:c.modelId,bid:c.maxOutputPrice})),
                 capped:rank(0.2).map(c=>({id:c.modelId,bid:c.maxOutputPrice})),
                 missing:rank(null).length && rank(0.001).length}));")]
-    (is (= ["cx/gpt-6.2-astra" "cx/gpt-6.2-sol" "ali/qwen4-max"] (mapv :id (:normal res)))
-        "a $1.00/M ask sits exactly on the ceiling, not one rounding step outside it, and the declared order holds")
+    (is (= ["cx/gpt-6.2-sol" "ali/qwen4-max" "zai/glm-5.4"] (mapv :id (:normal res)))
+        "a $1.00/M ask sits exactly on the ceiling, not one rounding step outside it, and the declared order holds — the removed astra is dropped even though this stale snapshot still names it at a buyable price")
     (is (= ["ali/qwen4-max"] (mapv :id (:capped res))))
     (is (every? #(= 1 (:bid %)) (:normal res))
         "an uncapped request is still bounded at the $1.00/M ceiling")
@@ -170,36 +176,36 @@
              "import { buildAutoSnapshot } from './src/router/auto.js';
               const mk = (id, asksOut, asksIn, cache) => ({id, supports_cache: cache,
                 pricing: {asks_in: asksIn, asks_out: asksOut}});
-              const astra = mk('cx/gpt-6.2-astra', [0.24], [0.10], true);
-              const sol = mk('cx/gpt-6.2-sol', [0.19], [0.10], false);
-              const withCache = buildAutoSnapshot({data: [astra, sol]}, 7200000);
-              const without = buildAutoSnapshot({data: [{...astra, supports_cache: false}, sol]}, 7200000);
+              const head = mk('cx/gpt-6.2-sol', [0.24], [0.10], true);
+              const tail = mk('ali/qwen4-max', [0.19], [0.10], false);
+              const withCache = buildAutoSnapshot({data: [head, tail]}, 7200000);
+              const without = buildAutoSnapshot({data: [{...head, supports_cache: false}, tail]}, 7200000);
               const pick = (s, id) => s.models.filter(m => m.modelId === id)[0];
               console.log(JSON.stringify({
                 orderWithCache: withCache.models.map(m => m.modelId),
                 orderWithout: without.models.map(m => m.modelId),
-                astra: ((m) => ({supportsCache: m.supportsCache, prompt: m.prompt,
-                  effectiveInput: m.effectiveInput, effectiveBlended: m.effectiveBlended}))(pick(withCache, 'cx/gpt-6.2-astra')),
-                sol: ((m) => ({supportsCache: m.supportsCache,
+                head: ((m) => ({supportsCache: m.supportsCache, prompt: m.prompt,
                   effectiveInput: m.effectiveInput, effectiveBlended: m.effectiveBlended}))(pick(withCache, 'cx/gpt-6.2-sol')),
-                astraNoCache: ((m) => ({supportsCache: m.supportsCache,
-                  effectiveInput: m.effectiveInput, effectiveBlended: m.effectiveBlended}))(pick(without, 'cx/gpt-6.2-astra')),
+                qwen: ((m) => ({supportsCache: m.supportsCache,
+                  effectiveInput: m.effectiveInput, effectiveBlended: m.effectiveBlended}))(pick(withCache, 'ali/qwen4-max')),
+                headNoCache: ((m) => ({supportsCache: m.supportsCache,
+                  effectiveInput: m.effectiveInput, effectiveBlended: m.effectiveBlended}))(pick(without, 'cx/gpt-6.2-sol')),
                 assumptions: withCache.cache}));")]
     (is (= 0.5 (get-in res [:assumptions :hitRate])))
     (is (= 0.1 (get-in res [:assumptions :tokenCost]))
         "cached tokens bill at 0.10x the fresh input ask (measured 2026-11-11: 5265/5276 prefix tokens cached, cache-read cost 5.25e-3 vs 5.7e-2)")
-    (is (= ["cx/gpt-6.2-astra" "cx/gpt-6.2-sol"] (:orderWithout res))
+    (is (= ["cx/gpt-6.2-sol" "ali/qwen4-max"] (:orderWithout res))
         "the declared sequence survives a cache-less member: the owner's order is not re-sorted")
-    (is (= ["cx/gpt-6.2-astra" "cx/gpt-6.2-sol"] (:orderWithCache res))
+    (is (= ["cx/gpt-6.2-sol" "ali/qwen4-max"] (:orderWithCache res))
         "cache support discounts the input share without moving the member")
     (is (= {:supportsCache true :prompt 0.10 :effectiveInput 0.055 :effectiveBlended 0.19375}
-           (:astra res))
+           (:head res))
         "effective input = ask * (1 - hitRate*(1 - tokenCost)) = 0.10 * 0.55")
     (is (= {:supportsCache false :effectiveInput 0.10 :effectiveBlended 0.1675}
-           (:sol res))
+           (:qwen res))
         "models without the flag pay the full input ask: effective = raw")
     (is (= {:supportsCache false :effectiveInput 0.10 :effectiveBlended 0.205}
-           (:astraNoCache res))
+           (:headNoCache res))
         "strip the flag and the same ask costs 0.205 blended, not 0.19375 — the discount is real, not cosmetic")))
 
 (deftest quota-health-demotes-saturated-members
@@ -209,29 +215,29 @@
               const mk = (id, asksOut, asksIn) => ({id, supports_cache: true,
                 pricing: {asks_in: asksIn, asks_out: asksOut}});
               const feed = {data: [
-                mk('cx/gpt-6.2-astra', [0.24], [0.10]),
                 mk('cx/gpt-6.2-sol', [0.19], [0.10]),
-                mk('ali/qwen4-max', [0.27], [0.06])
+                mk('ali/qwen4-max', [0.27], [0.06]),
+                mk('zai/glm-5.4', [0.88], [0.10])
               ]};
               const snapshot = auto.buildAutoSnapshot(feed, 7200000);
               const quota = {hour: 2, probedAt: 7200000, results: {
-                'cx/gpt-6.2-astra': {status: 'quota', sellersTotal: 2221, sellersOut: 2215, ms: 412},
-                'cx/gpt-6.2-sol': {status: 'ok', ms: 890}
+                'cx/gpt-6.2-sol': {status: 'quota', sellersTotal: 2221, sellersOut: 2215, ms: 412},
+                'ali/qwen4-max': {status: 'ok', ms: 890}
               }};
               const demoted = apply(snapshot, quota);
               const untouched = apply(snapshot, {hour: 2, probedAt: 7200000});
-              const astra = demoted.models.filter(m => m.modelId === 'cx/gpt-6.2-astra')[0] || null;
+              const head = demoted.models.filter(m => m.modelId === 'cx/gpt-6.2-sol')[0] || null;
               console.log(JSON.stringify({
                 order: demoted.models.map(m => m.modelId),
-                saturated: astra && astra.saturated,
-                astraQuota: astra && astra.quota,
+                saturated: head && head.saturated,
+                headQuota: head && head.quota,
                 untouchedOrder: untouched.models.map(m => m.modelId)}));")]
-    (is (= ["cx/gpt-6.2-sol" "ali/qwen4-max" "cx/gpt-6.2-astra"] (:order res))
+    (is (= ["ali/qwen4-max" "zai/glm-5.4" "cx/gpt-6.2-sol"] (:order res))
         "a saturated member demotes below every available member: seller quota gates the head slot, it is not a tie-break")
     (is (true? (:saturated res)) "the demoted member is labeled saturated")
-    (is (= {:status "quota" :sellersTotal 2221 :sellersOut 2215 :ms 412} (:astraQuota res))
+    (is (= {:status "quota" :sellersTotal 2221 :sellersOut 2215 :ms 412} (:headQuota res))
         "the live 429's seller evidence (N of M out of quota) rides on the member")
-    (is (= ["cx/gpt-6.2-astra" "cx/gpt-6.2-sol" "ali/qwen4-max"] (:untouchedOrder res))
+    (is (= ["cx/gpt-6.2-sol" "ali/qwen4-max" "zai/glm-5.4"] (:untouchedOrder res))
         "quota data that is absent or malformed is a no-op, never a demotion")))
 
 (deftest quota-probe-classifies-live-refusals-with-seller-evidence
@@ -293,15 +299,26 @@
               const feed = {data: [
                 model('cx/gpt-6.2-astra', [0.24, 0.26]),
                 model('cx/gpt-6.2-sol', [0.19, 0.21]),
+                model('zai/glm-5.4', [0.88, 0.9]),
                 model('ali/qwen4-max', [0.27, 0.3])
               ]};
               const snapshot = buildAutoSnapshot(feed, 7200000);
-              console.log(JSON.stringify({order: snapshot.models.map(m => m.modelId),
-                diagnostics: chainDiagnostics(snapshot)}));")]
-    (is (= ["cx/gpt-6.2-astra" "cx/gpt-6.2-sol" "ali/qwen4-max"] (:order res))
-        "all three declared members are buyable, served in the declared sequence")
+              const noTail = buildAutoSnapshot({data: feed.data.filter(m => m.id !== 'zai/glm-5.4')}, 7200000);
+              console.log(JSON.stringify({order: snapshot.models.map(m=>m.modelId),
+                tail: snapshot.models.map(m=>m.modelId).slice(-1)[0],
+                diagnostics: chainDiagnostics(snapshot),
+                noTailExcluded: noTail.excluded, noTailWarnings: chainDiagnostics(noTail).warnings}));")]
+    (is (= ["cx/gpt-6.2-sol" "ali/qwen4-max" "zai/glm-5.4"] (:order res))
+        "all three declared members are buyable, served in the declared sequence; astra, quoted cheap in the same feed, is not served")
+    (is (= "zai/glm-5.4" (:tail res))
+        "glm-5.4 is the tail: the last member the chain tries (owner directive 2026-11-24)")
     (is (= "owner-declared" (get-in res [:diagnostics :orderSource]))
         "the diagnostics name the order's author, so no report has to infer whether a sequence was bought or declared")
     (is (= 3 (get-in res [:diagnostics :chainDepth])))
-    (is (= "cx/gpt-6.2-astra" (get-in res [:diagnostics :head :modelId]))
-        "the head of the served chain is the first declared member")))
+    (is (= "cx/gpt-6.2-sol" (get-in res [:diagnostics :head :modelId]))
+        "the head of the served chain is the first declared member, now sol: astra left on 2026-11-24")
+    (is (= [{:modelId "zai/glm-5.4" :reason "not_in_feed"}] (:noTailExcluded res))
+        "a declared member the feed does not quote is named with the reason, never dropped silently")
+    (is (some #(re-find #"declared member absent from the served chain: zai/glm-5\.4" %)
+              (:noTailWarnings res))
+        "the diagnostics warn when the tail is missing from the served chain")))

@@ -29,7 +29,9 @@ export const MODEL_TIERS = {
   // generation yet, and the auto chain no longer ranks by quality — membership
   // and order are declared, so inventing scores here would only feed a report a
   // belief. These entries exist so a RAW request for these ids resolves to
-  // itself instead of silently rerouting to the default budget chain.
+  // itself instead of silently rerouting to the default budget chain — which
+  // is also why astra 6.2 keeps its entry after leaving the auto chain
+  // (owner directive 2026-11-24): removal from a chain is not retirement.
   "cx/gpt-6.2-astra": { tier: "frontier-flagship", quality: 0.70, family: "openai", context: 272000, unmeasuredQuality: true },
   "cx/gpt-6.2-sol": { tier: "frontier-flagship", quality: 0.70, family: "openai", context: 500000, unmeasuredQuality: true },
   "ali/qwen4-max": { tier: "moe-frontier", quality: 0.70, family: "qwen", context: 1000000, unmeasuredQuality: true }

@@ -34,8 +34,9 @@ export const CACHE_HIT_RATE = 0.5;
 export const CACHE_TOKEN_COST = 0.1;
 
 // The auto chain is DECLARED by the owner, in order (owner directive
-// 2026-11-21): these three, attempted in this sequence. Appended last by
-// owner directive 2026-11-24: zai/glm-5.4 as the tail member. The previous pool was
+// 2026-11-21), amended by two owner directives of 2026-11-24: astra 6.2
+// REMOVED, zai/glm-5.4 appended last. These three are attempted in this
+// sequence. The previous pool was
 // a set of Artificial Analysis scores that the value ranking then re-sorted at
 // serve time, which meant the owner could not read the chain he was buying —
 // the order was an inference. A declared order is a decision; the ranking
@@ -49,16 +50,16 @@ export const CACHE_TOKEN_COST = 0.1;
 // pareto.js pushes a circuit-tripped member to the back, so a head that is
 // actively failing is skipped rather than retried in the owner's name.
 //
-// Feed check 2026-11-21 (in-cap sellers at the $1.00 bid): astra 6.2 from
-// $0.24 (3), sol 6.2 from $0.19 (9), qwen4-max from $0.27 (3).
+// Feed checks (sellers whose output ask sits at or under the $1.00 bid):
+// 2026-11-21 — sol 6.2 from $0.19 (9), qwen4-max from $0.27 (3).
+// 2026-11-25 00:02 EAT — glm-5.4 from $0.0044 (5 of 7 asks); sol 6.2 then
+// asked $2.50 on every seller, i.e. over_cap until its book comes back down.
 export const AUTO_CHAIN = [
-  "cx/gpt-6.2-astra",
   "cx/gpt-6.2-sol",
   "ali/qwen4-max",
-  // Tail member, appended by owner directive 2026-11-24. No feed check has
-  // been recorded for it yet; the $1.00/M output bid adjudicates it like any
-  // other member — an over-cap ask names it over_cap in diagnostics rather
-  // than buying silently.
+  // Tail member, appended by owner directive 2026-11-24. The $1.00/M output
+  // bid adjudicates it like any other member — an over-cap ask names it
+  // over_cap in diagnostics rather than buying silently.
   "zai/glm-5.4"
 ];
 
