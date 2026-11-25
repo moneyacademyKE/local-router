@@ -247,7 +247,7 @@
   (testing "grok remains wired while the retired Sonnet entry stays absent"
     (let [res (run-node-eval
                "import { resolveVirtualModel, OFFICIAL_PRICES } from './src/router/catalog.js';
-                import { AUTO_CHAIN } from './src/router/auto.js';
+                import { AUTO_CHAIN } from './src/router/chains.js';
                 console.log(JSON.stringify({
                   glmBudget: resolveVirtualModel('infered/glm-budget'),
                   grokPrice: OFFICIAL_PRICES['grok/grok-4.7'],

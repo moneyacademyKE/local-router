@@ -10,7 +10,8 @@ import { executeWithFallback, executeWithChainFallback } from "./router/client.j
 import { collectAnalytics, renderAnalyticsPage } from "./ui/analytics.js";
 import { corsHeaders, jsonResponse, buildTelemetryHeaders, recordRoutingAnalytics, createStandaloneMockFetch } from "./router/telemetry.js";
 import { checkBodySize, validateChatBody, MAX_BODY_BYTES } from "./router/validate.js";
-import { AUTO_MODEL, getAutoSnapshot, probeQuotaHealth } from "./router/auto.js";
+import { getAutoSnapshot, probeQuotaHealth } from "./router/auto.js";
+import { AUTO_MODEL } from "./router/chains.js";
 import { buildDiagnostics } from "./router/diagnostics.js";
 
 const MAX_BODY_BYTES_STRING = MAX_BODY_BYTES;

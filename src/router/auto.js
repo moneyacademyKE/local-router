@@ -1,21 +1,16 @@
-/** Market snapshot for the owner-declared auto chain, rebuilt on a 30-minute
- * heartbeat (owner rule 2026-11-11). Membership and sequence come from
- * AUTO_CHAIN (owner directive 2026-11-21); measured health annotates each
- * member but never reorders it.
+/** Market snapshots for the market chains (./chains.js says which models, at
+ * what bid, in whose order), rebuilt hourly and on a 30-minute heartbeat
+ * (owner rule 2026-11-11). One mechanism serves every chain: a declared chain
+ * is annotated by measured health and never reordered; a value chain is
+ * re-sorted by it.
  * Availability is a price weight (owner rule 2026-11-11): a model's real price
  * is what several sellers can sustain inside the output bid, not what one lone
  * ask advertises. A book with a single in-cap seller is admitted but flagged
  * thinBook (2026-11-18) — depth orders the chain, it does not ban supply. */
 
 import { loadHealth, applyValueRanking } from "./health.js";
+import { AUTO_MODEL, MARKET_CHAINS } from "./chains.js";
 
-export const AUTO_MODEL = "infered/auto";
-// Output-price ceiling per attempt (owner directive 2026-11-18). The previous
-// fence sat one millionth of a dollar below cx/gpt-6-astra's only ask ($1.00),
-// so a rounding artifact — not a spending decision — collapsed the chain to a
-// single member. The ceiling is now exactly $1.00/M output; anything above
-// stays out.
-export const AUTO_OUTPUT_BID = 1;
 export const AUTO_HOUR_MS = 60 * 60 * 1000;
 // Heartbeat cadence (owner directive 2026-11-11): measured availability and
 // the scheduled refresh run every 30 minutes, without changing hourly D1 keys.
@@ -33,46 +28,13 @@ export const AUTO_MAX_HEARTBEAT_MS = 35 * 60 * 1000;
 export const CACHE_HIT_RATE = 0.5;
 export const CACHE_TOKEN_COST = 0.1;
 
-// The auto chain is DECLARED by the owner, in order (owner directive
-// 2026-11-21), amended by two owner directives of 2026-11-24: astra 6.2
-// REMOVED, zai/glm-5.4 appended last. These three are attempted in this
-// sequence. The previous pool was
-// a set of Artificial Analysis scores that the value ranking then re-sorted at
-// serve time, which meant the owner could not read the chain he was buying —
-// the order was an inference. A declared order is a decision; the ranking
-// machinery now only ANNOTATES each member (reliability, speed, value tier),
-// it no longer decides membership or sequence.
-//
-// The $1.00/M output bid still applies to every member (AUTO_OUTPUT_BID). A
-// member whose cheapest ask sits above it is excluded with reason `over_cap`
-// and named in diagnostics — silently buying outside the ceiling is the one
-// thing an owner order must never do. Live failure still outranks the order:
-// pareto.js pushes a circuit-tripped member to the back, so a head that is
-// actively failing is skipped rather than retried in the owner's name.
-//
-// Feed checks (sellers whose output ask sits at or under the $1.00 bid):
-// 2026-11-21 — sol 6.2 from $0.19 (9), qwen4-max from $0.27 (3).
-// 2026-11-25 00:02 EAT — glm-5.4 from $0.0044 (5 of 7 asks); sol 6.2 then
-// asked $2.50 on every seller, i.e. over_cap until its book comes back down.
-export const AUTO_CHAIN = [
-  "cx/gpt-6.2-sol",
-  "ali/qwen4-max",
-  // Tail member, appended by owner directive 2026-11-24. The $1.00/M output
-  // bid adjudicates it like any other member — an over-cap ask names it
-  // over_cap in diagnostics rather than buying silently.
-  "zai/glm-5.4"
-];
-
-const AUTO_MODEL_IDS = new Set(AUTO_CHAIN);
-
-export function isAutoEligibleModel(modelId) {
-  return AUTO_MODEL_IDS.has(modelId);
-}
-
-export function filterAutoSnapshotModels(snapshot) {
+/** Drops everything a persisted row names that the chain no longer does: a
+ * snapshot written before a chain change serves only current members. */
+export function filterAutoSnapshotModels(snapshot, chain = MARKET_CHAINS[AUTO_MODEL]) {
   if (!snapshot || typeof snapshot !== "object") return { models: [] };
+  const memberIds = new Set(chain.members.map(m => m.id));
   const models = Array.isArray(snapshot.models)
-    ? snapshot.models.filter(model => isAutoEligibleModel(model?.modelId))
+    ? snapshot.models.filter(model => memberIds.has(model?.modelId))
     : [];
   return { ...snapshot, models };
 }
@@ -94,12 +56,12 @@ function askLadder(pricing) {
     .map(Number).filter(v => Number.isFinite(v) && v >= 0).sort((a, b) => a - b);
 }
 
-export function buildAutoSnapshot(feed, now = Date.now()) {
+export function buildAutoSnapshot(feed, now = Date.now(), chain = MARKET_CHAINS[AUTO_MODEL]) {
   if (!Array.isArray(feed?.data)) throw new Error("Invalid live market response");
   const entries = new Map(feed.data.map(m => [m.id, m]));
   const models = [];
   const excluded = [];
-  for (const id of AUTO_CHAIN) {
+  for (const { id, score } of chain.members) {
     const entry = entries.get(id);
     const pricing = entry?.pricing;
     if (!pricing) { excluded.push({ modelId: id, reason: "not_in_feed" }); continue; }
@@ -108,7 +70,7 @@ export function buildAutoSnapshot(feed, now = Date.now()) {
     if (prompt === null || !asks.length) { excluded.push({ modelId: id, reason: "unpriced" }); continue; }
     // In-cap sellers = providers offering output inside the bid: the low price
     // tier this chain can actually buy from. Depth there is the stability weight.
-    const inCap = asks.filter(v => v <= AUTO_OUTPUT_BID);
+    const inCap = asks.filter(v => v <= chain.bid);
     if (!inCap.length) { excluded.push({ modelId: id, reason: "over_cap", ask: asks[0] }); continue; }
     // A one-seller book is NOT excluded (2026-11-18). The router buys from that
     // seller at a price inside the bid, so the model is genuinely purchasable;
@@ -129,16 +91,23 @@ export function buildAutoSnapshot(feed, now = Date.now()) {
       : prompt;
     const depthPrice = inCap[inCap.length - 1];
     const effectiveBlended = Number(((0.25 * effectiveInput) + (0.75 * depthPrice)).toFixed(6));
-    models.push({ modelId: id, prompt, completion: asks[0],
+    models.push({ modelId: id, ...(Number.isFinite(score) ? { score } : {}), prompt, completion: asks[0],
       askCount: asks.length, inCapDepth: inCap.length, depthPrice, thinBook,
       supportsCache, effectiveInput, effectiveBlended });
   }
-  // Declared order IS the served order — no build-time sort, no score-led
-  // reshuffle. applyValueRanking still annotates every member, but it is told
-  // not to reorder (see withValueOrder), so a cold D1 and a warm one agree on
-  // the sequence the owner asked for.
+  // A declared chain's order IS its served order — no build-time sort, no
+  // score-led reshuffle (applyValueRanking is told not to reorder, see
+  // withValueOrder, so a cold D1 and a warm one agree on the sequence the
+  // owner asked for). A value chain keeps a deterministic capability-led build
+  // order — score, then depth, then blended price — as the sequence health
+  // re-sorts, so a cold D1 still serves a sensible chain.
+  if (chain.order === "value") {
+    models.sort((a, b) => (b.score ?? 0) - (a.score ?? 0) ||
+      b.inCapDepth - a.inCapDepth || a.effectiveBlended - b.effectiveBlended ||
+      a.modelId.localeCompare(b.modelId));
+  }
   const hour = Math.floor(now / AUTO_HOUR_MS);
-  return { hour, refreshedAt: now, nextRefreshAt: (hour + 1) * AUTO_HOUR_MS,
+  return { hour, refreshedAt: now, nextRefreshAt: (hour + 1) * AUTO_HOUR_MS, model: chain.model, bid: chain.bid,
     cache: { hitRate: CACHE_HIT_RATE, tokenCost: CACHE_TOKEN_COST,
       measured: "2026-11-11 live double-probe: 5265/5276 prefix tokens cached, cache-read billed at 0.10x fresh input ask" },
     models, excluded };
@@ -186,8 +155,8 @@ function classifyQuotaProbe(status, message) {
  * quota (evidence parsed from the refusal), 403 = refused, anything else =
  * unknown — a network flake never demotes. Probes carry the output bid
  * header so measurement can never overspend. Persists best-effort to the
- * auto-quota row; the returned payload is the truth either way. */
-export async function probeQuotaHealth(env, members, fetchFn = fetch, now = Date.now()) {
+ * chain's quota row; the returned payload is the truth either way. */
+export async function probeQuotaHealth(env, members, fetchFn = fetch, now = Date.now(), chain = MARKET_CHAINS[AUTO_MODEL]) {
   const baseUrl = env?.INFERHUB_BASE_URL || "https://api.inferhub.dev/v1";
   const results = {};
   for (const member of members) {
@@ -198,7 +167,7 @@ export async function probeQuotaHealth(env, members, fetchFn = fetch, now = Date
         method: "POST",
         headers: { "Content-Type": "application/json",
           Authorization: `Bearer ${env?.INFERHUB_API_KEY}`,
-          "x-max-output-price": String(AUTO_OUTPUT_BID) },
+          "x-max-output-price": String(chain.bid) },
         body: JSON.stringify({ model: member.modelId, max_tokens: 8, stream: false,
           messages: [{ role: "user", content: "Reply with OK" }] }),
         signal: AbortSignal.timeout(20000)
@@ -213,7 +182,7 @@ export async function probeQuotaHealth(env, members, fetchFn = fetch, now = Date
   const payload = { hour, probedAt: now, results };
   try {
     await env?.ROUTING_DB?.prepare(
-      "INSERT INTO auto_chain_snapshot (id, hour, payload) VALUES ('auto-quota', ?1, ?2) " +
+      `INSERT INTO auto_chain_snapshot (id, hour, payload) VALUES ('${chain.quotaRowId}', ?1, ?2) ` +
       "ON CONFLICT(id) DO UPDATE SET hour=excluded.hour, payload=excluded.payload"
     ).bind(hour, JSON.stringify(payload)).run();
     // No freshness guard on the quota row: the heartbeat writer is single and
@@ -224,22 +193,22 @@ export async function probeQuotaHealth(env, members, fetchFn = fetch, now = Date
   return payload;
 }
 
-async function readSnapshot(db) {
-  return db.prepare("SELECT hour, payload FROM auto_chain_snapshot WHERE id = 'auto'").bind().first();
+async function readSnapshot(db, rowId) {
+  return db.prepare(`SELECT hour, payload FROM auto_chain_snapshot WHERE id = '${rowId}'`).bind().first();
 }
 
-function withStaleness(row, currentHour) {
-  const snapshot = filterAutoSnapshotModels(JSON.parse(row.payload));
+function withStaleness(row, currentHour, chain) {
+  const snapshot = filterAutoSnapshotModels(JSON.parse(row.payload), chain);
   return { ...snapshot, stale: Number(row.hour) < currentHour };
 }
 
 /** Applies measured quota health to a served snapshot. Quota data older than
  * one hour is ignored; any read failure is a no-op — health is an
  * enhancement, never a dependency of the chain. */
-async function withQuotaHealth(snapshot, db, hour) {
+async function withQuotaHealth(snapshot, db, hour, quotaRowId) {
   try {
     const row = await db.prepare(
-      "SELECT hour, payload FROM auto_chain_snapshot WHERE id = 'auto-quota'"
+      `SELECT hour, payload FROM auto_chain_snapshot WHERE id = '${quotaRowId}'`
     ).bind().first();
     if (row && Number(row.hour) >= hour - 1) {
       return applyQuotaHealth(snapshot, JSON.parse(row.payload));
@@ -248,17 +217,18 @@ async function withQuotaHealth(snapshot, db, hour) {
   return snapshot;
 }
 
-/** Annotates the declared chain with measured health: reliability, speed,
- * value tier, attempt counts, cooldown. It does NOT reorder — the owner
+/** Annotates the chain with measured health: reliability, speed, value tier,
+ * attempt counts, cooldown. A declared chain is NOT reordered — the owner
  * declared the sequence (2026-11-21), so a model that has been slower or less
- * reliable still sits where the owner put it and says so in its own fields.
- * A D1 read failure degrades to the un-annotated build order, never to a dead
- * chain. Live failure still outranks the order downstream: pareto.js pushes a
- * circuit-tripped member to the back. */
-async function withValueOrder(snapshot, db, now) {
+ * reliable still sits where the owner put it and says so in its own fields. A
+ * value chain IS reordered: intelligence per dollar is a measurement, so the
+ * measured order is the served order. A D1 read failure degrades to the
+ * build order, never to a dead chain. Live failure still outranks the order
+ * downstream: pareto.js pushes a circuit-tripped member to the back. */
+async function withValueOrder(snapshot, db, now, chain) {
   try {
     const health = await loadHealth(db, now);
-    return health ? applyValueRanking(snapshot, health, { reorder: false }) : snapshot;
+    return health ? applyValueRanking(snapshot, health, { reorder: chain.order === "value" }) : snapshot;
   } catch { return snapshot; }
 }
 
@@ -267,7 +237,8 @@ async function withValueOrder(snapshot, db, now) {
  * knew all of this — it just never said it, so every question about a short
  * chain needed a SQL session. Pure function of the snapshot: no I/O, no
  * secrets, nothing that can fail. */
-export function chainDiagnostics(snapshot, bid = AUTO_OUTPUT_BID) {
+export function chainDiagnostics(snapshot, chain = MARKET_CHAINS[AUTO_MODEL]) {
+  const bid = chain.bid;
   const models = Array.isArray(snapshot?.models) ? snapshot.models : [];
   const excluded = Array.isArray(snapshot?.excluded) ? snapshot.excluded : [];
   const gateCounts = {};
@@ -290,7 +261,7 @@ export function chainDiagnostics(snapshot, bid = AUTO_OUTPUT_BID) {
   if (!models.length) {
     warnings.push("chain is empty: nothing is buyable inside the output bid");
   } else if (models.length < 3) {
-    warnings.push(`chain depth ${models.length} of ${models.length + excluded.length} declared members` +
+    warnings.push(`chain depth ${models.length} of ${models.length + excluded.length} ${chain.noun}s` +
       (gates ? ` (${gates})` : ""));
   }
   if (models.length && !models.some(m => m.valueTier === "proven")) {
@@ -298,21 +269,21 @@ export function chainDiagnostics(snapshot, bid = AUTO_OUTPUT_BID) {
   }
   if (cooling.length) warnings.push(`cooling after a recent failure: ${cooling.join(", ")}`);
   if (thin.length) warnings.push(`thin book, one in-cap seller: ${thin.join(", ")}`);
-  // A declared member that the gates dropped is the owner's business, not a
-  // silent omission: name it, and name why, in the same sentence.
+  // A member that the gates dropped is the owner's business, not a silent
+  // omission: name it, and name why, in the same sentence.
   const servedIds = new Set(models.map(m => m.modelId));
-  const missing = AUTO_CHAIN.filter(id => !servedIds.has(id));
+  const missing = chain.members.map(m => m.id).filter(id => !servedIds.has(id));
   if (missing.length) {
-    warnings.push(`declared member absent from the served chain: ${missing.join(", ")}` +
+    warnings.push(`${chain.noun} absent from the served chain: ${missing.join(", ")}` +
       (gates ? ` (${gates})` : ""));
   }
   if (unlock) warnings.push(`raise the output bid to ${unlock.ask} to admit ${unlock.modelId}`);
   const head = models[0] || null;
   return { bid, chainDepth: models.length, gateCounts, thinBook: thin, cooling,
-    // Who decided this sequence: the owner declared it (AUTO_CHAIN). The value
-    // ranking annotates; it does not sort. Said explicitly so a report never
-    // has to infer whether an order was bought or inferred.
-    orderSource: "owner-declared",
+    // Who decided this sequence. A declared chain says so; a value chain
+    // says the order was measured. Said explicitly so a report never has to
+    // infer whether an order was bought, declared, or found.
+    orderSource: chain.orderSource,
     head: head ? { modelId: head.modelId, valueTier: head.valueTier,
       valueScore: head.valueScore, measuredAttempts: head.measuredAttempts } : null,
     unlock, warnings };
@@ -326,21 +297,22 @@ export function chainDiagnostics(snapshot, bid = AUTO_OUTPUT_BID) {
  * ordering, never the limit. No snapshot at all fails closed. Never falls
  * back to seeded or official prices.
  *
- * Ordering layers, innermost first: the build (capability), the measured
- * value order (reliability/speed/cost), and quota health last — a member whose
- * sellers are out of quota is demoted regardless of how good its value is.
+ * Ordering layers, innermost first: the build order, the measured value
+ * order (reliability/speed/cost — it re-sorts a value chain and only
+ * annotates a declared one), and quota health last — a member whose sellers
+ * are out of quota is demoted regardless of how good its value is.
  * Diagnostics ride on the result: they describe the chain, they never shape it.
  */
-export async function getAutoSnapshot(env, fetchFn = fetch, now = Date.now()) {
+export async function getAutoSnapshot(env, fetchFn = fetch, now = Date.now(), chain = MARKET_CHAINS[AUTO_MODEL]) {
   const db = env?.ROUTING_DB;
   if (!db || !env?.INFERHUB_API_KEY) throw new Error("Auto chain needs D1 and a live market key");
   const hour = Math.floor(now / AUTO_HOUR_MS);
   const serve = async (row) => {
     const snapshot = await withQuotaHealth(
-      await withValueOrder(withStaleness(row, hour), db, now), db, hour);
-    return { ...snapshot, diagnostics: chainDiagnostics(snapshot) };
+      await withValueOrder(withStaleness(row, hour, chain), db, now, chain), db, hour, chain.quotaRowId);
+    return { ...snapshot, diagnostics: chainDiagnostics(snapshot, chain) };
   };
-  let row = await readSnapshot(db);
+  let row = await readSnapshot(db, chain.rowId);
   if (row && Number(row.hour) === hour) return serve(row);
 
   const baseUrl = env.INFERHUB_BASE_URL || "https://api.inferhub.dev/v1";
@@ -349,13 +321,13 @@ export async function getAutoSnapshot(env, fetchFn = fetch, now = Date.now()) {
       headers: { Authorization: `Bearer ${env.INFERHUB_API_KEY}` }
     });
     if (!response.ok) throw new Error(`Auto market refresh failed (${response.status})`);
-    const snapshot = buildAutoSnapshot(await response.json(), now);
+    const snapshot = buildAutoSnapshot(await response.json(), now, chain);
     await db.prepare(
-      "INSERT INTO auto_chain_snapshot (id, hour, payload) VALUES ('auto', ?1, ?2) " +
+      `INSERT INTO auto_chain_snapshot (id, hour, payload) VALUES ('${chain.rowId}', ?1, ?2) ` +
       "ON CONFLICT(id) DO UPDATE SET hour=excluded.hour, payload=excluded.payload " +
       "WHERE excluded.hour > auto_chain_snapshot.hour"
     ).bind(hour, JSON.stringify(snapshot)).run();
-    row = await readSnapshot(db);
+    row = await readSnapshot(db, chain.rowId);
   } catch (refreshError) {
     if (!row) throw refreshError;
     return serve(row);

@@ -3,7 +3,7 @@
  * Pure data structures and resolution logic for Infered router.
  */
 
-import { AUTO_CHAIN } from "./auto.js";
+import { AUTO_CHAIN } from "./chains.js";
 
 // Model capabilities and quality benchmarks (normalized 0.0 - 1.0).
 // Slimmed 2026-09-05 (owner directive): chain members plus owner-designated

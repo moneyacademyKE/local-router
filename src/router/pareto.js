@@ -7,7 +7,7 @@
 import { resolveVirtualModel, getModelMetadata, CASCADE_CHAINS, CEILING_EXEMPT_MODELS } from "./catalog.js";
 import { getQuotesForModel, calculateSavingsPct } from "./pricing.js";
 import { getProviderStats, isCircuitOpen } from "./metrics.js";
-import { AUTO_MODEL, AUTO_OUTPUT_BID, isAutoEligibleModel } from "./auto.js";
+import { MARKET_CHAINS } from "./chains.js";
 
 export const DEFAULT_WEIGHTS = {
   price: 0.5,
@@ -224,11 +224,16 @@ export function rankCandidates({
   startAtModel = null,
   autoSnapshot = null
 }) {
-  if (model === AUTO_MODEL) {
-    const bid = maxFallbackPrice === null ? AUTO_OUTPUT_BID : Math.min(AUTO_OUTPUT_BID, maxFallbackPrice);
+  // A market chain (infered/auto, infered/auto-budget): the hourly snapshot IS
+  // the candidate list, in the chain's own order, under the chain's own bid.
+  // A request may tighten the bid, never loosen it.
+  const marketChain = MARKET_CHAINS[model];
+  if (marketChain) {
+    const bid = maxFallbackPrice === null ? marketChain.bid : Math.min(marketChain.bid, maxFallbackPrice);
     if (!Number.isFinite(bid) || bid < 0) return [];
+    const memberIds = new Set(marketChain.members.map(m => m.id));
     return (autoSnapshot?.models || []).filter(m =>
-      isAutoEligibleModel(m?.modelId) &&
+      memberIds.has(m?.modelId) &&
       Number.isFinite(m.completion) && m.completion >= 0 && m.completion <= bid
     ).map((m, i) => {
       const providerId = "inferhub-auto";
