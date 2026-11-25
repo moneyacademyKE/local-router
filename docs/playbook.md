@@ -21,7 +21,7 @@ bb dev
 One command, pinned, in the right order:
 
 ```bash
-# Migrations (remote) -> deploy -> snapshot bust -> read every market chain back
+# Migrations (remote) -> deploy -> wait for the new version -> snapshot bust -> read every market chain back
 ./scripts/deploy.sh
 ```
 
@@ -41,7 +41,10 @@ A green `wrangler deploy` is not a correct deploy. On 2026-11-18 the worker
 shipped writing to `routing_attempts` while remote D1 was still at migration
 0003, so every attempt insert threw silently; the snapshot cache was stale on
 top of it. Migrations and the cache bust are part of the deploy, which is why
-they live in the script.
+they live in the script. So is waiting: on 2026-11-25 the first request after
+the cache bust was answered by the previous version, which rebuilt the
+`infered/auto` row with its own chain. The script now waits for the new
+version and fails unless every chain serves the order this build declares.
 
 ## 3. Model Catalog (current: 8 products)
 Routing is data-driven from `src/router/catalog.js` — chains are plain arrays; the router resolves the first link that has a live, in-budget spot ask:
