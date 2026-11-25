@@ -326,7 +326,10 @@ export async function getAutoSnapshot(env, fetchFn = fetch, now = Date.now(), ch
   const serve = async (row) => {
     const snapshot = await withQuotaHealth(
       await withValueOrder(withStaleness(row, hour, chain), db, now, chain), db, hour, chain.quotaRowId);
-    return { ...snapshot, diagnostics: chainDiagnostics(snapshot, chain) };
+    // `declared` is the chain as written in ./chains.js, said by the live table
+    // rather than the stored row, so a reader can set the two orders side by
+    // side: what was declared, and what is being served.
+    return { ...snapshot, declared: chain.members.map(m => m.id), diagnostics: chainDiagnostics(snapshot, chain) };
   };
   let row = await readSnapshot(db, chain.rowId);
   if (row && Number(row.hour) === hour) return serve(row);

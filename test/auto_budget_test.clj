@@ -222,6 +222,7 @@
                  sent: sent.slice(0, 2), glm54Served: sent.some(s => s[0] === 'zai/glm-5.4'),
                  budget: [budgetView.diagnostics.bid, budgetView.diagnostics.orderSource, budgetView.models.map(m => m.modelId)],
                  auto: [autoView.diagnostics.bid, autoView.diagnostics.orderSource, autoView.models.map(m => m.modelId)],
+                 declared: [budgetView.declared, autoView.declared],
                  cache}));"))]
     (is (= 200 (:status res)))
     (is (= "ali/kimi-k3.1-pro" (:selected res))
@@ -236,6 +237,10 @@
         "GET /v1/auto-budget inspects the chain: its bid, who decided the order, and the order")
     (is (= [1 "owner-declared" ["zai/glm-5.4"]] (:auto res))
         "GET /v1/auto still inspects the declared chain — one endpoint shape per chain, one mechanism behind it")
+    (is (= [["ag/gemini-4-carbon" "cx/gpt-6-astra" "oai/gpt-6.1-sol" "cx/gpt-6.1-terra" "oai/gpt-6.1-terra" "ali/kimi-k3.1-pro" "grok/grok-4.7" "ali/glm-5.3"]
+            ["cx/gpt-6.2-sol" "ali/qwen4-max" "zai/glm-5.4"]]
+           (:declared res))
+        "each inspect payload also states the chain as declared, so declared order and served order can be read side by side without a completion")
     (is (= [["MISS" 200 2] ["MISS" 200 2]] (:cache res))
         "a market chain is never answered from the deterministic cache: its order is measured, so a repeat is a new decision, not a fixture")))
 
