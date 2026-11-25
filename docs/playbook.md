@@ -43,17 +43,21 @@ shipped writing to `routing_attempts` while remote D1 was still at migration
 top of it. Migrations and the cache bust are part of the deploy, which is why
 they live in the script.
 
-## 3. Model Catalog (current: 6 chain products)
+## 3. Model Catalog (current: 8 products)
 Routing is data-driven from `src/router/catalog.js` — chains are plain arrays; the router resolves the first link that has a live, in-budget spot ask:
 
 | Product | Cascade order |
 |---|---|
-| `infered/glm-budget` *(default)* | `ali/glm-5.3` → `grok/grok-4.7` → `ali/kimi-k3.1-pro` → `cx/gpt-6.1-terra` |
+| `infered/glm-budget` *(default)* | `zai/glm-5.4` → `ali/glm-5.3` → `grok/grok-4.7` → `ali/kimi-k3.1-pro` → `cx/gpt-6.1-terra` |
 | `infered/astra-budget` | `cx/gpt-6-astra` → `ali/kimi-k3.1-pro` |
 | `infered/astra-terra` | `cx/gpt-6-astra` → `cx/gpt-6.1-terra` → `ali/kimi-k3.1-pro` |
 | `infered/terra-kimi` | `cx/gpt-6.1-terra` → `ali/kimi-k3.1-pro` |
 | `infered/kimi-glm` | `ali/kimi-k3.1-pro` |
 | `infered/solterra` | `oai/gpt-6.1-sol` → `oai/gpt-6.1-terra` |
+| `infered/auto` | owner-declared, $1.00/M output bid: `cx/gpt-6.2-sol` → `ali/qwen4-max` → `zai/glm-5.4` |
+| `infered/auto-budget` | a scored pool under a hard $0.50/M output bid, re-ordered by measured value at serve time |
+
+The two `auto` products are **market chains**, not cascades: each is served from an hourly D1 snapshot of live asks, every upstream attempt carries the chain's output bid, and `GET /v1/auto` / `GET /v1/auto-budget` show the served order. Details: `docs/auto-chain.md`.
 
 - Unknown/unregistered model names and requests without a model fall to `infered/glm-budget`.
 - Budget ladder: $0.50 tier-0 ceiling (spot asks only), then an unconstrained last-resort tier that admits official list prices (counted as `officialLastResortServes` on `/v1/metrics`).
@@ -118,7 +122,9 @@ local D1, no Cloudflare dependency for the primary door.
 - `auto` heartbeat: `dev.moneyacad.infered.auto` curls
   `/__scheduled?cron=0%2C30%20*%20*%20*` (requires `--test-scheduled`, enabled).
   Fires at minutes **2 and 32** of every hour — a 30-minute heartbeat for
-  measured seller-quota health (owner directive 2026-11-11); the market snapshot
+  measured seller-quota health (owner directive 2026-11-11; since 2026-11-25
+  one fire covers every market chain, `infered/auto` then `infered/auto-budget`,
+  each probe under its own chain's bid); the market snapshot
   itself stays hourly (a two-entry `StartCalendarInterval` array + `RunAtLoad`;
   `StartInterval` never fired under bootstrap and was retired 2026-11-11).
   Log: `~/.opencrabs/state/infered-local/auto-refresh.log` (clean since

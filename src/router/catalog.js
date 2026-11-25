@@ -3,7 +3,7 @@
  * Pure data structures and resolution logic for Infered router.
  */
 
-import { AUTO_CHAIN } from "./chains.js";
+import { AUTO_CHAIN, AUTO_BUDGET_POOL } from "./chains.js";
 
 // Model capabilities and quality benchmarks (normalized 0.0 - 1.0).
 // Slimmed 2026-09-05 (owner directive): chain members plus owner-designated
@@ -115,10 +115,11 @@ export const SOLTERRA_CHAIN = [
   "oai/gpt-6.1-terra"
 ];
 
-// Virtual models that route as ordered budget cascades. Single source of truth —
-// the router detects cascade requests by lookup here, not by string comparison.
-// Six products (2026-11-09): every other name a client sends reroutes
-// to the default budget chain.
+// The product list, and the single source of truth for what a model name
+// means: the router recognises a request by lookup here, never by string
+// comparison. Eight products — six ordered budget cascades (2026-11-09) and
+// the two market chains, which list membership only. Every other name a
+// client sends reroutes to the default budget chain.
 export const CASCADE_CHAINS = {
   "infered/glm-budget": GLM_BUDGET_FALLBACK_CHAIN,
   "infered/astra-budget": ASTRA_BUDGET_FALLBACK_CHAIN,
@@ -128,7 +129,10 @@ export const CASCADE_CHAINS = {
   "infered/solterra": SOLTERRA_CHAIN,
   // Declared membership in declared order (owner directive 2026-11-21); the
   // hourly market snapshot supplies each member's live asks.
-  "infered/auto": [...AUTO_CHAIN]
+  "infered/auto": [...AUTO_CHAIN],
+  // Membership only (owner directive 2026-11-25). This list is NOT the try
+  // order: the chain re-sorts itself by measured value at serve time.
+  "infered/auto-budget": AUTO_BUDGET_POOL.map(m => m.id)
 };
 
 // Default requested model — also where UNRECOGNIZED names land (typos like

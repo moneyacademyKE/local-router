@@ -193,6 +193,22 @@ export async function probeQuotaHealth(env, members, fetchFn = fetch, now = Date
   return payload;
 }
 
+/** The 30-minute heartbeat, for every chain: make sure the hour's snapshot
+ * exists, then measure seller quota. Chains run one after another on purpose
+ * — each battery is a burst of upstream probes, and two at once would double
+ * it. A chain that fails is logged and skipped: one dead book must not stop
+ * the other from being measured. */
+export async function runHeartbeat(env, now = Date.now()) {
+  for (const chain of Object.values(MARKET_CHAINS)) {
+    try {
+      const snapshot = await getAutoSnapshot(env, fetch, now, chain);
+      await probeQuotaHealth(env, snapshot?.models || [], fetch, now, chain);
+    } catch (e) {
+      console.error(`heartbeat: ${chain.model} skipped:`, e?.message || e);
+    }
+  }
+}
+
 async function readSnapshot(db, rowId) {
   return db.prepare(`SELECT hour, payload FROM auto_chain_snapshot WHERE id = '${rowId}'`).bind().first();
 }

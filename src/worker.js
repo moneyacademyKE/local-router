@@ -10,8 +10,8 @@ import { executeWithFallback, executeWithChainFallback } from "./router/client.j
 import { collectAnalytics, renderAnalyticsPage } from "./ui/analytics.js";
 import { corsHeaders, jsonResponse, buildTelemetryHeaders, recordRoutingAnalytics, createStandaloneMockFetch } from "./router/telemetry.js";
 import { checkBodySize, validateChatBody, MAX_BODY_BYTES } from "./router/validate.js";
-import { getAutoSnapshot, probeQuotaHealth } from "./router/auto.js";
-import { AUTO_MODEL } from "./router/chains.js";
+import { getAutoSnapshot, runHeartbeat } from "./router/auto.js";
+import { MARKET_CHAINS } from "./router/chains.js";
 import { buildDiagnostics } from "./router/diagnostics.js";
 
 const MAX_BODY_BYTES_STRING = MAX_BODY_BYTES;
@@ -106,17 +106,12 @@ function triggerBackgroundSwrSyncIfNeeded(priceCache, baseUrl, apiKey, ctx) {
 
 export default {
   async scheduled(_controller, env, ctx) {
-    // Respond fast, probe in the background: the 11-member battery runs up
-    // to ~90s serial; awaiting it made /__scheduled outlast launchd curl's
+    // Respond fast, probe in the background: a chain's battery runs up to
+    // ~90s serial; awaiting it made /__scheduled outlast launchd curl's
     // patience, so the agent log was 100% (28) timeouts while D1 stayed the
-    // only real signal. waitUntil keeps the isolate alive for the battery
+    // only real signal. waitUntil keeps the isolate alive for the batteries
     // without blocking the HTTP trigger.
-    const run = (async () => {
-      const snapshot = await getAutoSnapshot(env);
-      // Seller-quota measurement (owner rule 2026-11-11): one tiny probe per
-      // member, every 30 minutes, so saturated books demote before requests burn them.
-      await probeQuotaHealth(env, snapshot?.models || []).catch(() => {});
-    })();
+    const run = runHeartbeat(env);
     if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(run);
     else await run;
   },
@@ -190,8 +185,11 @@ export default {
       });
     }
 
-    if (path === "/v1/auto" && request.method === "GET") {
-      try { return jsonResponse(await getAutoSnapshot(env)); }
+    // One inspect endpoint per market chain (/v1/auto, /v1/auto-budget): the
+    // served order, the gates, and each member's measured health.
+    const inspectChain = request.method === "GET" && MARKET_CHAINS[`infered/${path.slice(4)}`];
+    if (inspectChain) {
+      try { return jsonResponse(await getAutoSnapshot(env, undefined, Date.now(), inspectChain)); }
       catch { return jsonResponse({ error: "Auto market snapshot unavailable" }, 503); }
     }
 
@@ -292,9 +290,11 @@ export default {
         // infered/ form; canonicalise before anything compares the string.
         const requestedModel = canonicalModelName(requestBody.model) || "infered/glm-budget";
         const { weights, maxFallbackPrice } = parseWeightsAndBudget(request, requestBody, env, url);
+        // A market chain is served from its own hourly snapshot, or not at all.
         let autoSnapshot = null;
-        if (requestedModel === AUTO_MODEL) {
-          try { autoSnapshot = await getAutoSnapshot(env); }
+        const marketChain = MARKET_CHAINS[requestedModel] || null;
+        if (marketChain) {
+          try { autoSnapshot = await getAutoSnapshot(env, undefined, Date.now(), marketChain); }
           catch { return jsonResponse({ error: { message: "Auto market snapshot unavailable; no safe route.", type: "provider_error" } }, 503); }
         }
         const startAtModel = request.headers.get("X-Infered-Tier") === "strong" ? resolveStrongLink(requestedModel) : null;
@@ -306,7 +306,7 @@ export default {
         const sessionAffinity = await getSessionPin(cacheStore, sessionId, env);
 
         // 2. Exact Deterministic Response Caching check
-        const isDeterministic = requestedModel !== AUTO_MODEL && (requestBody.temperature === 0 || request.headers.get("X-Infered-Cache") === "true") && !requestBody.stream;
+        const isDeterministic = !marketChain && (requestBody.temperature === 0 || request.headers.get("X-Infered-Cache") === "true") && !requestBody.stream;
         const cacheKey = isDeterministic ? computeRequestKey(requestBody) : null;
 
         if (isDeterministic && cacheKey) {

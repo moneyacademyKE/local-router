@@ -1,12 +1,17 @@
-/** A market chain — plain data. One hourly snapshot of live marketplace
- * asks, served under ONE output bid per attempt. The mechanism that
- * snapshots, serves and diagnoses a chain lives in auto.js; this file only
- * says WHICH models, at WHAT bid, in WHOSE order. The chain is an argument of
- * that mechanism, not a constant inside it.
+/** The market chains — plain data. A market chain is one hourly snapshot of
+ * live marketplace asks, served under ONE output bid per attempt. The
+ * mechanism that snapshots, serves and diagnoses a chain lives in auto.js;
+ * this file only says WHICH models, at WHAT bid, and in WHOSE order.
  *
- *   infered/auto — membership and sequence DECLARED by the owner
- *                  (2026-11-21). Measured health annotates each member
- *                  and never reorders it. */
+ * Two chains exist:
+ *   infered/auto         — membership and sequence DECLARED by the owner
+ *                          (2026-11-21). Measured health annotates each member
+ *                          and never reorders it.
+ *   infered/auto-budget  — a SCORED POOL searched for the highest
+ *                          intelligence per dollar (owner directive
+ *                          2026-11-25). The served order is measured, not
+ *                          declared: valueScore = intelligence x reliability
+ *                          x speed / effectiveBlended (see ./health.js). */
 
 // ---- infered/auto ----------------------------------------------------------
 
@@ -26,7 +31,9 @@ export const AUTO_OUTPUT_BID = 1;
 // read the chain he was buying — the order was an inference. A declared order
 // is a decision; the ranking machinery now only ANNOTATES each member
 // (reliability, speed, value tier), it no longer decides membership or
-// sequence.
+// sequence. That value-ranked pool returns, on purpose, as infered/auto-budget
+// below: auto is the order the owner reads, auto-budget is the order the
+// router finds.
 //
 // A member whose cheapest ask sits above the bid is excluded with reason
 // `over_cap` and named in diagnostics — silently buying outside the ceiling is
@@ -47,6 +54,32 @@ export const AUTO_CHAIN = [
   "zai/glm-5.4"
 ];
 
+// ---- infered/auto-budget ---------------------------------------------------
+
+export const AUTO_BUDGET_MODEL = "infered/auto-budget";
+// "under $0.5 output" (owner directive 2026-11-25). Hard for every member: the
+// CEILING_EXEMPT_MODELS escape belongs to the astra-headed cascade products,
+// and the owner named this ceiling explicitly. An ask exactly at $0.50 is
+// inside it — the same on-the-ceiling rule the $1.00 bid follows.
+export const AUTO_BUDGET_OUTPUT_BID = 0.5;
+// Intelligence scores are the Artificial Analysis snapshot from 2026-11-10,
+// not live scores — the recorded values the auto chain ranked by before it
+// became owner-declared on 2026-11-21. A model with no score on record is NOT
+// in the pool: an intelligence-per-dollar search cannot rank intelligence it
+// does not know, and an invented score would be a belief wearing a number.
+// Admitting a model is recording its score here; that is the whole change.
+// Argon stays out (owner directive 2026-11-11).
+export const AUTO_BUDGET_POOL = [
+  { id: "ag/gemini-4-carbon", score: 60 },
+  { id: "cx/gpt-6-astra", score: 57 },
+  { id: "oai/gpt-6.1-sol", score: 55 },
+  { id: "cx/gpt-6.1-terra", score: 51 },
+  { id: "oai/gpt-6.1-terra", score: 51 },
+  { id: "ali/kimi-k3.1-pro", score: 46 },
+  { id: "grok/grok-4.7", score: 35.5 },
+  { id: "ali/glm-5.3", score: 32 }
+];
+
 /** Everything the mechanism needs to serve one chain. Each chain keeps its own
  * D1 rows (`rowId` for the hourly snapshot, `quotaRowId` for the measured
  * seller quota), so one chain's book can never leak into the other's.
@@ -58,5 +91,10 @@ export const MARKET_CHAINS = {
     model: AUTO_MODEL, rowId: "auto", quotaRowId: "auto-quota", bid: AUTO_OUTPUT_BID,
     members: AUTO_CHAIN.map(id => ({ id })), order: "declared",
     orderSource: "owner-declared", noun: "declared member"
+  },
+  [AUTO_BUDGET_MODEL]: {
+    model: AUTO_BUDGET_MODEL, rowId: "auto-budget", quotaRowId: "auto-budget-quota",
+    bid: AUTO_BUDGET_OUTPUT_BID, members: AUTO_BUDGET_POOL, order: "value",
+    orderSource: "measured-value", noun: "pool member"
   }
 };

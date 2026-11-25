@@ -1,8 +1,34 @@
 # `infered/auto`
 
+> Two market chains share this document and one mechanism: `infered/auto` (order declared by the owner) and `infered/auto-budget` (order measured — see its section below). The longer sections that follow describe the snapshot, quota and bid machinery both chains run on. **Stale since 2026-11-21:** where they describe `infered/auto`'s eight-model roster, a `priority` sort, or the exclusion of thin books, they describe the chain as it was before it was declared (commit `def6658`). Its members and order are the three in the table below.
+
 The `infered/` prefix is a namespace, not part of the product: a request naming `auto` resolves to this same chain. Every alias that omits the prefix (`auto`, `glm-budget`, `astra-budget`, `solterra`, …) is canonicalised to its `infered/` form before routing, so a client cannot silently land on the default cascade by leaving the prefix off. Raw model ids and unknown names keep their existing path — an unknown name still resolves to the default `infered/glm-budget` chain.
 
 `infered/auto` selects from the eight models in its roster (`src/router/auto.js`). Its fixed intelligence scores are an Artificial Analysis benchmark snapshot, not live or task-specific quality scores. The roster grew from the 10 November 2026 comparison: `grok/grok-4.7` (score 35.5, 9 in-cap sellers at $0.006/M out) remains in the roster; the retired Sonnet entry is no longer probed or ranked. The same day `ag/gemini-4-carbon` (score 60.0, the market's top score, $0.01–$0.50/M out asks) joined under the seller-quota rule below: its thin book saturates hard, and measured quota health demotes it below available members until supply recovers. `ag/gemini-4-argon` is market-eligible but **excluded by owner directive (2026-11-11)**; a test pin keeps it out of the roster.
+
+## `infered/auto-budget` (2026-11-25)
+
+The second market chain, built for "the highest intelligence per dollar under $0.50/M output" (owner directive 2026-11-25). It is the same mechanism as `infered/auto` — hourly snapshot, stale serving, quota health, cache-aware pricing, a bid on every attempt — with different data. Both chains are plain data in `src/router/chains.js`.
+
+| | `infered/auto` | `infered/auto-budget` |
+|---|---|---|
+| Members | owner-declared: `cx/gpt-6.2-sol` → `ali/qwen4-max` → `zai/glm-5.4` | a pool of eight models, each with a recorded intelligence score |
+| Order | declared: measured health annotates and never reorders | measured: re-sorted at serve time |
+| Output bid | $1.00/M | $0.50/M, hard for every member (no ceiling exemption) |
+| D1 rows | `auto`, `auto-quota` | `auto-budget`, `auto-budget-quota` |
+| Inspect | `GET /v1/auto` | `GET /v1/auto-budget` |
+
+**The pool** is every model with a recorded Artificial Analysis intelligence score — the 2026-11-10 snapshot the auto chain ranked by until it was declared: `ag/gemini-4-carbon` 60, `cx/gpt-6-astra` 57, `oai/gpt-6.1-sol` 55, `cx/gpt-6.1-terra` 51, `oai/gpt-6.1-terra` 51, `ali/kimi-k3.1-pro` 46, `grok/grok-4.7` 35.5, `ali/glm-5.3` 32. No score is invented, so a model without one cannot compete: `zai/glm-5.4`, the 6.2 generation and `ali/qwen4-max` are not in the pool. To admit a model, record its score in `AUTO_BUDGET_POOL`.
+
+**The order** is `valueScore = intelligence × reliability × speed ÷ effectiveBlended`, sorted in the value tiers of `src/router/health.js`: members that have answered come first; a member that is cooling or disproven goes last. With no attempt history it is pure intelligence per dollar, which can put the least intelligent member first when it is cheap enough — that is the point of the chain. `diagnostics.orderSource` reads `measured-value` (`owner-declared` for `infered/auto`), so a report never has to infer which kind of order it is reading.
+
+**The ceiling** is the owner's. A request can tighten it with `X-Infered-Max-Price` and can never loosen it; an ask exactly at $0.50 is inside it. The chain has no fallback to another chain, on purpose: a declared fallback could serve above the ceiling. When nothing in the pool is buyable, the request fails with `400` instead.
+
+**Not cached.** Neither market chain is answered from the deterministic response cache: a cached reply would freeze one member's answer for a chain whose order is meant to move.
+
+**The heartbeat** measures every chain every 30 minutes, one after the other, each probe under its own chain's bid.
+
+**State of the market at about 03:27 EAT, 2026-11-25 (local door):** one member was buyable — `grok/grok-4.7` from $0.30, tagged `disproven` after six failed attempts in the previous 24 hours (it did answer the verification request). `ag/gemini-4-carbon`, the cheapest excluded member, asked $0.60. Prices move; read `/v1/auto-budget` for the current chain.
 
 ## Try order vs. capability score
 
