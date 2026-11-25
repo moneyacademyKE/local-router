@@ -21,7 +21,7 @@ bb dev
 One command, pinned, in the right order:
 
 ```bash
-# Migrations (remote) -> deploy -> snapshot bust -> read the chain back
+# Migrations (remote) -> deploy -> snapshot bust -> read every market chain back
 ./scripts/deploy.sh
 ```
 
