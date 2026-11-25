@@ -122,6 +122,42 @@
       (is (= 200 (:deepStatus res)) "real 555-message agent sessions route (2026-11-09 fallback incident)")
       (is (= 200 (:okStatus res)) "valid minimal requests still route"))))
 
+(deftest test-inherited-object-key-is-an-unknown-model-name
+  (testing "a model naming a key every object inherits is an unknown name: it falls to the default chain, never a 500"
+    (let [res (run-node-eval
+               "import worker from './src/worker.js';
+                import { resolveVirtualModel, resolveStrongLink, CHAIN_FALLBACKS, VIRTUAL_ALIASES, GLM_BUDGET_FALLBACK_CHAIN } from './src/router/catalog.js';
+                import { MARKET_CHAINS } from './src/router/chains.js';
+                const env = { INFERHUB_BASE_URL: 'https://api.inferhub.net/v1' };
+                const ctx = { waitUntil: () => {} };
+                const rows = [];
+                for (const name of ['__proto__', 'constructor', 'Constructor', 'no-such-model']) {
+                  const r = await worker.fetch(new Request('https://edge.infered.ai/v1/chat/completions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ model: name, messages: [{ role: 'user', content: 'hello' }] })
+                  }), env, ctx);
+                  await r.text();
+                  rows.push([name, r.status, r.headers.get('x-infered-selected-model')]);
+                }
+                const probe = (name) => ({
+                  toDefault: JSON.stringify(resolveVirtualModel(name)) === JSON.stringify(VIRTUAL_ALIASES['infered/glm-budget']),
+                  strong: resolveStrongLink(name), chainFallback: CHAIN_FALLBACKS[name] ?? null,
+                  marketChain: MARKET_CHAINS[name] ?? null
+                });
+                console.log(JSON.stringify({ rows, defaultChain: GLM_BUDGET_FALLBACK_CHAIN,
+                  proto: probe('__proto__'), ctor: probe('constructor'), unknown: probe('no-such-model') }));")]
+      (is (every? #(= 200 (second %)) (:rows res))
+          "no name crashes the worker: each answers 200")
+      (is (every? #(some #{(nth % 2)} (:defaultChain res)) (:rows res))
+          "each is served by the default chain, exactly like a plainly unknown name")
+      (is (= (:unknown res) (:proto res))
+          "__proto__ resolves, pins and falls back exactly as an unknown name does")
+      (is (= (:unknown res) (:ctor res))
+          "so does constructor — which used to be read as a known chain and threw a TypeError")
+      (is (= "ali/kimi-k3.1-pro" (:strong (:ctor res))))
+      (is (nil? (:marketChain (:ctor res)))))))
+
 (deftest test-health-distinguishes-seeded-from-live-market
   (testing "health reports market live/seeded state honestly, not synthetic capacity as truth"
     (let [res (run-node-eval

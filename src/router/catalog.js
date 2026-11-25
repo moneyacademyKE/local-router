@@ -3,7 +3,7 @@
  * Pure data structures and resolution logic for Infered router.
  */
 
-import { AUTO_CHAIN, AUTO_BUDGET_POOL } from "./chains.js";
+import { AUTO_CHAIN, AUTO_BUDGET_POOL, TABLE } from "./chains.js";
 
 // Model capabilities and quality benchmarks (normalized 0.0 - 1.0).
 // Slimmed 2026-09-05 (owner directive): chain members plus owner-designated
@@ -11,7 +11,7 @@ import { AUTO_CHAIN, AUTO_BUDGET_POOL } from "./chains.js";
 // model zoo. MODEL_TIERS presence is what makes a raw request resolve to
 // the model itself; removed names reroute to the default budget chain.
 // (qwen and other retired names are intentionally absent from the catalog).
-export const MODEL_TIERS = {
+export const MODEL_TIERS = TABLE({
   "cx/gpt-6.1-terra": { tier: "balanced-frontier", quality: 0.91, family: "openai", context: 500000 },
   "oai/gpt-6.1-sol": { tier: "frontier-flagship", quality: 0.96, family: "openai", context: 1050000 },
   "oai/gpt-6.1-terra": { tier: "balanced-frontier", quality: 0.91, family: "openai", context: 1050000 },
@@ -35,7 +35,7 @@ export const MODEL_TIERS = {
   "cx/gpt-6.2-astra": { tier: "frontier-flagship", quality: 0.70, family: "openai", context: 272000, unmeasuredQuality: true },
   "cx/gpt-6.2-sol": { tier: "frontier-flagship", quality: 0.70, family: "openai", context: 500000, unmeasuredQuality: true },
   "ali/qwen4-max": { tier: "moe-frontier", quality: 0.70, family: "qwen", context: 1000000, unmeasuredQuality: true }
-};
+});
 
 // Official provider list prices in USD per 1M tokens [Prompt, Completion]
 export const OFFICIAL_PRICES = {
@@ -120,7 +120,7 @@ export const SOLTERRA_CHAIN = [
 // comparison. Eight products — six ordered budget cascades (2026-11-09) and
 // the two market chains, which list membership only. Every other name a
 // client sends reroutes to the default budget chain.
-export const CASCADE_CHAINS = {
+export const CASCADE_CHAINS = TABLE({
   "infered/glm-budget": GLM_BUDGET_FALLBACK_CHAIN,
   "infered/astra-budget": ASTRA_BUDGET_FALLBACK_CHAIN,
   "infered/astra-terra": ASTRA_TERRA_CHAIN,
@@ -133,7 +133,7 @@ export const CASCADE_CHAINS = {
   // Membership only (owner directive 2026-11-25). This list is NOT the try
   // order: the chain re-sorts itself by measured value at serve time.
   "infered/auto-budget": AUTO_BUDGET_POOL.map(m => m.id)
-};
+});
 
 // Default requested model — also where UNRECOGNIZED names land (typos like
 // "zai/gm5.3", removed models like raw sol). Unknown must mean "budget-safe
@@ -145,14 +145,14 @@ export const DEFAULT_MODEL = "infered/glm-budget";
 // cascade. Chains are ECONOMIC orderings (head = preferred under spot prices),
 // so the strong link is an explicit capability pick, not a position guess.
 // Kimi carries the remaining reasoner link; Astra heads its premium chains.
-export const CHAIN_STRONG_LINKS = {
+export const CHAIN_STRONG_LINKS = TABLE({
   "infered/glm-budget": "ali/kimi-k3.1-pro",
   "infered/astra-budget": "cx/gpt-6-astra",
   "infered/astra-terra": "cx/gpt-6-astra",
   "infered/terra-kimi": "ali/kimi-k3.1-pro",
   "infered/kimi-glm": "ali/kimi-k3.1-pro",
   "infered/solterra": "oai/gpt-6.1-sol"
-};
+});
 
 // Mirrors the cascade resolution rule (CASCADE_CHAINS hit, else default chain)
 // so tier:strong on a typo'd name still lands on the default chain's muscle.
@@ -165,16 +165,16 @@ export function resolveStrongLink(model) {
 // Declared sibling-chain fallback: when a chain prices out entirely or every
 // candidate fails upstream, the executor may retry exactly once on this chain.
 // glm-budget is terminal (no entry — no fallback, no loop).
-export const CHAIN_FALLBACKS = {
+export const CHAIN_FALLBACKS = TABLE({
   "infered/astra-budget": "infered/glm-budget"
-};
+});
 
 // Virtual aliases mapping to candidate model sets — the two chains ARE the
 // whole surface. Anything unlisted (raw members excepted) lands on the
 // default budget chain via resolveVirtualModel.
-export const VIRTUAL_ALIASES = {
+export const VIRTUAL_ALIASES = TABLE({
   ...CASCADE_CHAINS
-};
+});
 
 /**
  * Canonicalises a requested model name. The `infered/` prefix is a namespace,

@@ -80,13 +80,21 @@ export const AUTO_BUDGET_POOL = [
   { id: "ali/glm-5.3", score: 32 }
 ];
 
+/** A lookup table with no inherited keys. These tables are keyed by names that
+ * arrive in a request body, and a plain object literal answers "constructor"
+ * and "__proto__" with Object.prototype's own members — truthy, and not
+ * products. Measured 2026-11-25: `model: "constructor"` was read as a known
+ * chain and crashed the worker (500) instead of falling to the default chain
+ * like any other unknown name. */
+export const TABLE = (entries) => Object.assign(Object.create(null), entries);
+
 /** Everything the mechanism needs to serve one chain. Each chain keeps its own
  * D1 rows (`rowId` for the hourly snapshot, `quotaRowId` for the measured
  * seller quota), so one chain's book can never leak into the other's.
  * `order`: "declared" tries the members in the listed sequence (measured health
  * annotates, never reorders); "value" re-sorts them by measured value at serve
  * time. */
-export const MARKET_CHAINS = {
+export const MARKET_CHAINS = TABLE({
   [AUTO_MODEL]: {
     model: AUTO_MODEL, rowId: "auto", quotaRowId: "auto-quota", bid: AUTO_OUTPUT_BID,
     members: AUTO_CHAIN.map(id => ({ id })), order: "declared",
@@ -97,4 +105,4 @@ export const MARKET_CHAINS = {
     bid: AUTO_BUDGET_OUTPUT_BID, members: AUTO_BUDGET_POOL, order: "value",
     orderSource: "measured-value", noun: "pool member"
   }
-};
+});
