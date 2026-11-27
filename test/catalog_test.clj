@@ -24,7 +24,8 @@
                 }));")]
       (is (:hasAliases res))
       (is (vector? (:autoModels res)))
-      (is (> (count (:autoModels res)) 0))
+      (is (zero? (count (:autoModels res)))
+          "infered/auto is a discovered chain (2026-11-27): the alias is empty by design and the live market supplies the candidates")
       ;; Sol and the retired tail are absent; the surviving four-model chain is canonical.
       (is (= ["zai/glm-5.4", "ali/glm-5.3", "grok/grok-4.7", "ali/kimi-k3.1-pro", "cx/gpt-6.1-terra"]
              (:cascadeModels res)))
@@ -247,12 +248,14 @@
   (testing "grok remains wired while the retired Sonnet entry stays absent"
     (let [res (run-node-eval
                "import { resolveVirtualModel, OFFICIAL_PRICES } from './src/router/catalog.js';
-                import { AUTO_CHAIN } from './src/router/chains.js';
+                import { MARKET_CHAINS, chainParameters, OWNER_EXCLUDED_FAMILIES } from './src/router/chains.js';
                 console.log(JSON.stringify({
                   glmBudget: resolveVirtualModel('infered/glm-budget'),
                   grokPrice: OFFICIAL_PRICES['grok/grok-4.7'],
                   sonnetPrice: OFFICIAL_PRICES['ag/claude-sonnet-' + '4-6'],
-                  poolIds: AUTO_CHAIN
+                  autoEntry: resolveVirtualModel('infered/auto'),
+                  autoParams: chainParameters(MARKET_CHAINS['infered/auto']),
+                  excludedFamilies: OWNER_EXCLUDED_FAMILIES
                 }));")]
       (is (= ["zai/glm-5.4" "ali/glm-5.3" "grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra"]
              (:glmBudget res))
@@ -264,10 +267,10 @@
           "grok official list 2/6 per the live feed")
       (is (nil? (:sonnetPrice res))
           "retired sonnet has no official price entry")
-      (is (= ["cx/gpt-6.2-sol" "ali/qwen4-max" "zai/glm-5.4"] (:poolIds res))
-          "the auto chain is the owner-declared sequence: astra removed, glm-5.4 appended last (owner directives 2026-11-24)")
-      (is (not-any? #(= (str "ag/" "4-6") %) (:poolIds res)) "retired sonnet is absent from the auto chain")
-      (is (not-any? #{"grok/grok-4.7"} (:poolIds res))
-          "grok left the auto chain when the owner declared the three (2026-11-21)")
-      (is (not-any? #{"ag/gemini-4-argon"} (:poolIds res))
-          "gemini-4-argon stays OUT of the pool (owner directive 2026-11-11: do not add argon)"))))
+      (is (= [] (:autoEntry res))
+          "infered/auto has no member list: the name resolves to the product and the live market supplies the candidates (owner directive 2026-11-27)")
+      (is (= {:maxOutputPrice 1 :order "measured-value" :refreshMs 300000 :exclude ["gemini4argon"]}
+             (:autoParams res))
+          "the auto chain states its parameters under the owner's $1.00 bid, ranked by measured value")
+      (is (= ["gemini4argon"] (:excludedFamilies res))
+          "gemini-4-argon stays OUT of every market chain (owner directive 2026-11-11: do not add argon)"))))

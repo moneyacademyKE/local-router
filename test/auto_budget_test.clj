@@ -7,8 +7,9 @@
 ;; Membership is every text model the live feed quotes inside the $0.50 bid
 ;; that carries a known intelligence score. The served order is measured value
 ;; (intelligence x reliability x speed / effectiveBlended). The same snapshot,
-;; staleness, quota and diagnostics mechanism serves infered/auto — that chain's
-;; order is declared, this one is found.
+;; staleness, quota and diagnostics mechanism serves infered/auto — both chains
+;; are discovered (2026-11-27) and differ only in the bid: $0.50 here, $1.00
+;; there.
 
 (defn run-node-eval [js]
   (let [{:keys [exit out err]} (sh "node" "--input-type=module" "-e" js)]
@@ -85,7 +86,7 @@
                import { intelligenceFromBoard } from './src/router/intelligence.js';
                " model-fn board-fn "
                const now = 7200000, period = Math.floor(now / 300000);
-               const budget = MARKET_CHAINS['infered/auto-budget'], declared = MARKET_CHAINS['infered/auto'];
+               const budget = MARKET_CHAINS['infered/auto-budget'], auto = MARKET_CHAINS['infered/auto'];
                const scored = intelligenceFromBoard(board);
                const serve = async (payload, health, chain) => {
                  const row = {hour: period, payload: JSON.stringify(payload)};
@@ -115,18 +116,23 @@
                  'grok/grok-4.7': {ok: 20, fail: 0, avgMs: 2000, lastOkAt: now - 1000, lastFailAt: null},
                  'ali/kimi-k3.1-pro': {ok: 1, fail: 0, avgMs: 8000, lastOkAt: now - 1000, lastFailAt: null},
                  'ag/gemini-4-carbon': {ok: 0, fail: 6, avgMs: null, lastOkAt: null, lastFailAt: now - 20 * 60000},
-                 'cx/gpt-6.2-sol': {ok: 0, fail: 6, avgMs: null, lastOkAt: null, lastFailAt: now - 20 * 60000}
+                 'cx/gpt-6-astra': {ok: 0, fail: 6, avgMs: null, lastOkAt: null, lastFailAt: now - 20 * 60000}
                }};
                const measured = await serve(buildAutoSnapshot(cheapCarbon, now, budget, scored), health, budget);
                const foreign = buildAutoSnapshot(cheapCarbon, now, budget, scored);
                foreign.models.push({modelId: 'cb/deepseek-v4', prompt: 0.001, completion: 0.004});
                const filtered = await serve(foreign, null, budget);
-               const declaredMeasured = await serve(buildAutoSnapshot({data: [
-                 model('cx/gpt-6.2-sol', [0.19]), model('ali/qwen4-max', [0.27]), model('zai/glm-5.4', [0.88])
-               ]}, now, declared), health, declared);
+               const wideFeed = {data: [
+                 model('cx/gpt-6-astra', [0.55, 0.60]),
+                 model('ali/kimi-k3.1-pro', [0.20, 0.30]),
+                 model('grok/grok-4.7', [0.30, 0.44])
+               ]};
+               const budgetWide = await serve(buildAutoSnapshot(wideFeed, now, budget, scored), null, budget);
+               const autoWide = await serve(buildAutoSnapshot(wideFeed, now, auto, scored), health, auto);
                console.log(JSON.stringify({unmeasured: slim(unmeasured), priced: slim(priced), measured: slim(measured),
-                 filtered: filtered.models.map(m => m.modelId), declared: slim(declaredMeasured),
-                 sources: [unmeasured.diagnostics.orderSource, declaredMeasured.diagnostics.orderSource],
+                 filtered: filtered.models.map(m => m.modelId),
+                 budgetWide: slim(budgetWide), budgetWideExcluded: budgetWide.excluded, auto: slim(autoWide),
+                 sources: [unmeasured.diagnostics.orderSource, autoWide.diagnostics.orderSource],
                  parameters: unmeasured.parameters, attempts: unmeasured.models.map(m => m.measuredAttempts)}));"))]
     (is (= [["grok/grok-4.7" "unproven"] ["ali/kimi-k3.1-pro" "unproven"] ["ag/gemini-4-carbon" "unproven"]]
            (mapv #(subvec % 0 2) (:unmeasured res)))
@@ -139,10 +145,14 @@
            (mapv #(subvec % 0 2) (:measured res)))
         "what a member has done outranks what it promises")
     (is (zero? (nth (nth (:measured res) 2) 2)) "a member that never answered has a value of zero")
-    (is (= ["cx/gpt-6.2-sol" "ali/qwen4-max" "zai/glm-5.4"] (mapv first (:declared res)))
-        "the SAME health data leaves the declared chain in the owner's sequence")
-    (is (= "disproven" (nth (first (:declared res)) 1)))
-    (is (= ["measured-value" "owner-declared"] (:sources res)))
+    (is (= [{:modelId "cx/gpt-6-astra" :reason "over_cap" :ask 0.55}] (:budgetWideExcluded res))
+        "the SAME feed excludes astra from the $0.50 chain: its 0.55 ask sits over that bid")
+    (is (= ["grok/grok-4.7" "ali/kimi-k3.1-pro" "cx/gpt-6-astra"] (mapv first (:auto res)))
+        "and admits it to the $1.00 chain: the two chains differ only in the bid (owner directive 2026-11-27)")
+    (is (= "disproven" (nth (last (:auto res)) 1))
+        "the same health data orders both chains: what a member has done outranks what it promises")
+    (is (= ["measured-value" "measured-value"] (:sources res))
+        "both chains state a measured order — no declared sequence remains anywhere")
     (is (= ["ag/gemini-4-carbon" "ali/kimi-k3.1-pro" "grok/grok-4.7"] (:filtered res))
         "a persisted row cannot smuggle in a model the chain cannot score")
     (is (= {:maxOutputPrice 0.5 :order "measured-value" :refreshMs 300000 :exclude ["gemini4argon"]}
@@ -194,9 +204,9 @@
                  model('ali/kimi-k3.1-pro', [0.20, 0.30]),
                  model('grok/grok-4.7', [0.30, 0.44])
                ]}, now, MARKET_CHAINS['infered/auto-budget'], scored);
-               const other = buildAutoSnapshot({data: [model('cb/deepseek-v4', [0.0044, 0.005])]}, now, MARKET_CHAINS['infered/auto']);
+               const other = buildAutoSnapshot({data: [model('cx/gpt-6-astra', [0.55, 0.60])]}, now, MARKET_CHAINS['infered/auto'], scored);
                const rows = {'auto-budget': {hour: period, payload: JSON.stringify(budget)},
-                 'auto': {hour: Math.floor(now / 3600000), payload: JSON.stringify(other)}};
+                 'auto': {hour: period, payload: JSON.stringify(other)}};
                const db = {prepare(sql) { return {bind() { return {
                  async first() {
                    if (sql.includes('WHERE id = ?1')) return null;
@@ -233,11 +243,11 @@
                }
                console.log(JSON.stringify({status: response.status, selected: response.headers.get('x-infered-selected-model'),
                  budgetTier: response.headers.get('x-infered-budget-tier'), content: body.choices[0].message.content,
-                 sent: sent.slice(0, 2), leaked: sent.some(s => s[0] === 'cb/deepseek-v4'),
+                 sent: sent.slice(0, 2), leaked: sent.some(s => s[0] === 'cx/gpt-6-astra'),
                  budget: [budgetView.diagnostics.bid, budgetView.diagnostics.orderSource, budgetView.models.map(m => m.modelId)],
                  auto: [autoView.diagnostics.bid, autoView.diagnostics.orderSource, autoView.models.map(m => m.modelId)],
                  declared: [budgetView.declared, autoView.declared], parameters: budgetView.parameters,
-                 cache}));"))]
+                 autoParams: autoView.parameters, cache}));"))]
     (is (= 200 (:status res)))
     (is (= "ali/kimi-k3.1-pro" (:selected res))
         "the measured head fails, so the chain tries the next member")
@@ -246,12 +256,14 @@
     (is (= [["ag/gemini-4-carbon" "0.5" 8] ["ali/kimi-k3.1-pro" "0.5" 8]] (:sent res))
         "every upstream attempt carries the chain's bid")
     (is (false? (:leaked res))
-        "the request is served from the auto-budget row; the other chain's cheaper member never leaks in")
+        "the request is served from the auto-budget row; the auto chain's 0.55-ask member never leaks into a $0.50-bid request")
     (is (= [0.5 "measured-value" ["ag/gemini-4-carbon" "ali/kimi-k3.1-pro" "grok/grok-4.7"]] (:budget res)))
-    (is (= [1 "owner-declared" []] (:auto res))
-        "GET /v1/auto still inspects the declared chain, and an unscored model is not a member of it")
-    (is (nil? (first (:declared res))) "a discovered chain has no declared member list")
-    (is (= ["cx/gpt-6.2-sol" "ali/qwen4-max" "zai/glm-5.4"] (second (:declared res))))
+    (is (= [1 "measured-value" ["cx/gpt-6-astra"]] (:auto res))
+        "GET /v1/auto inspects the discovered $1.00 chain: its row holds a scored member the $0.50 chain cannot buy")
+    (is (every? nil? (:declared res)) "neither market chain declares a member list")
+    (is (= {:maxOutputPrice 1 :order "measured-value" :refreshMs 300000 :exclude ["gemini4argon"]}
+           (:autoParams res))
+        "the auto chain's parameters state the $1.00 bid under which astra is a legal candidate")
     (is (= {:maxOutputPrice 0.5 :order "measured-value" :refreshMs 300000 :exclude ["gemini4argon"]}
            (:parameters res)))
     (is (= [["MISS" 200 2] ["MISS" 200 2]] (:cache res))
@@ -305,6 +317,7 @@
                     const many = Array.from({length: 20}, (_, i) =>
                       ({id: 'grok/grok-4-' + i, pricing: {asks_in: [0.01], asks_out: [0.01 + i / 1000]}}));
                     return new Response(JSON.stringify({data: feedCalls === 1 ? [
+                      {id: 'cx/gpt-6-astra', pricing: {asks_in: [0.1], asks_out: [0.55, 0.60]}},
                       {id: 'cx/gpt-6.2-sol', pricing: {asks_in: [0.1], asks_out: [0.19]}},
                       {id: 'ali/qwen4-max', pricing: {asks_in: [0.01], asks_out: [0.27]}}]
                       : [{id: 'grok/grok-4.7', pricing: {asks_in: [0.012], asks_out: [0.006]}}, ...many]}), {status: 200});
@@ -338,16 +351,16 @@
               const both = await run(false);
               console.log(JSON.stringify({both, oneDead: await run(true), cap: QUOTA_PROBE_CAP}));")]
     (is (= 12 (:cap res)))
-    (is (= [["cx/gpt-6.2-sol" "1" 8] ["ali/qwen4-max" "1" 8]]
-           (take 2 (:probes (:both res))))
-        "the declared chain is probed in full, under its own bid, before the budget chain")
-    (let [budget (drop 2 (:probes (:both res)))]
+    (is (= [["cx/gpt-6-astra" "1" 8]]
+           (take 1 (:probes (:both res))))
+        "the discovered auto chain probes its scored head under the $1.00 bid; unscored sol and qwen are not members of it")
+    (let [budget (drop 1 (:probes (:both res)))]
       (is (= 12 (count budget)) "a discovered chain of 21 scored members probes only its served head")
       (is (every? #(= ["0.5" 8] (rest %)) budget) "every budget probe carries the $0.50 bid")
       (is (= "grok/grok-4.7" (ffirst budget)) "the head is the best value, probed first"))
-    (is (= ["auto" "auto-quota" "auto-intelligence" "auto-budget" "auto-budget-quota"]
+    (is (= ["auto-intelligence" "auto" "auto-quota" "auto-budget" "auto-budget-quota"]
            (:written (:both res)))
-        "each chain keeps its own rows, and the board is read before the chain that needs it")
+        "the board row is written by the FIRST discovered chain's refresh — auto reads it too now — and each chain keeps its own rows")
     (is (empty? (:errors (:both res))))
     (is (= 12 (count (:probes (:oneDead res)))))
     (is (= ["auto-intelligence" "auto-budget" "auto-budget-quota"] (:written (:oneDead res))))

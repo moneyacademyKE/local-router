@@ -90,9 +90,9 @@
              (str fake-db-js
                   "import { buildDiagnostics } from './src/router/diagnostics.js';
                    const now = 3600000 * 100;
-                   const hour = Math.floor(now / 3600000);
+                   const hour = Math.floor(now / 300000);
                    const payload = {models: [
-                     {modelId: 'cx/gpt-6.2-astra', score: 50, effectiveBlended: 0.5, bid: 1},
+                     {modelId: 'cx/gpt-6.2-astra', effectiveBlended: 0.5, bid: 1},
                      {modelId: 'cx/gpt-6.2-sol', score: 40, effectiveBlended: 0.4, bid: 1},
                      {modelId: 'zai/glm-5.4', score: 30, effectiveBlended: 0.3, bid: 1, thinBook: true}
                    ]};
@@ -110,7 +110,7 @@
                    const out = await buildDiagnostics({ROUTING_DB: db, INFERHUB_API_KEY: 'k'}, db, now);
                    console.log(JSON.stringify(out));"))]
     (is (= ["cx/gpt-6.2-sol" "zai/glm-5.4"] (get-in res [:chain :order]))
-        "declared members are served in the owner's order, thin book included; the row's stale astra is dropped, not served")
+        "a persisted row serves only what the chain can score: the row's unscored astra is dropped, not served; the scored members keep their row order, thin book included")
     (is (false? (get-in res [:chain :stale]))
         "the chain window is judged against the same clock as the payload timestamp")
     (is (contains? (get-in res [:chain :diagnostics]) :warnings)

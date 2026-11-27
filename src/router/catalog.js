@@ -3,7 +3,7 @@
  * Pure data structures and resolution logic for Infered router.
  */
 
-import { AUTO_CHAIN, TABLE } from "./chains.js";
+import { TABLE } from "./chains.js";
 
 // Model capabilities and quality benchmarks (normalized 0.0 - 1.0).
 // Slimmed 2026-09-05 (owner directive): chain members plus owner-designated
@@ -23,7 +23,9 @@ export const MODEL_TIERS = TABLE({
   // feed gives it 1M context and a two-ask book ($0.01/$0.50 out) that
   // saturates hard — measured quota health demotes it while sellers are out.
   "ag/gemini-4-carbon": { tier: "frontier-flagship", quality: 0.97, family: "google", context: 1048576 },
-  // Owner-declared auto chain 2026-11-21. Context windows are the live feed's
+  // Raw-request entries for the 6.2 generation (chain membership stopped
+  // being catalogued here when infered/auto became a discovered chain,
+  // owner directive 2026-11-27). Context windows are the live feed's
   // input_token_limit (272K / 500K / 1M). Quality is the router's unknown-model
   // default, NOT a measurement: no intelligence snapshot exists for the 6.2
   // generation yet, and the auto chain no longer ranks by quality — membership
@@ -127,9 +129,11 @@ export const CASCADE_CHAINS = TABLE({
   "infered/terra-kimi": TERRA_KIMI_CHAIN,
   "infered/kimi-glm": KIMI_GLM_CHAIN,
   "infered/solterra": SOLTERRA_CHAIN,
-  // Declared membership in declared order (owner directive 2026-11-21); the
-  // hourly market snapshot supplies each member's live asks.
-  "infered/auto": [...AUTO_CHAIN],
+  // A discovered chain (owner directive 2026-11-27): no list, under its own
+  // $1.00 bid. The entry exists so the NAME resolves to this product; its
+  // candidates are whatever the live market offers inside its parameters,
+  // read from its snapshot.
+  "infered/auto": [],
   // A discovered chain (owner directive 2026-11-25): no list. The entry
   // exists so the NAME resolves to this product; its candidates are whatever
   // the live market offers inside its parameters, read from its snapshot.

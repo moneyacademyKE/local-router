@@ -27,7 +27,8 @@ export const INTELLIGENCE_ROW_ID = "auto-intelligence";
 export const INTELLIGENCE_PERIOD_MS = 12 * 60 * 60 * 1000;
 
 // Artificial Analysis Intelligence Index, the snapshot of 2026-11-10/11 the
-// auto chain ranked by until it became owner-declared (2026-11-21). Kept as
+// auto chain ranked by until the owner declared its sequence (2026-11-21) —
+// and again since both chains became discovered (2026-11-27). Kept as
 // the vendor ids they were recorded under; the family keys are derived below
 // by the same normaliser every other score goes through.
 const RECORDED = [

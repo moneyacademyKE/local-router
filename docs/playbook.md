@@ -57,10 +57,10 @@ Routing is data-driven from `src/router/catalog.js` — chains are plain arrays;
 | `infered/terra-kimi` | `cx/gpt-6.1-terra` → `ali/kimi-k3.1-pro` |
 | `infered/kimi-glm` | `ali/kimi-k3.1-pro` |
 | `infered/solterra` | `oai/gpt-6.1-sol` → `oai/gpt-6.1-terra` |
-| `infered/auto` | owner-declared, $1.00/M output bid: `cx/gpt-6.2-sol` → `ali/qwen4-max` → `zai/glm-5.4` |
+| `infered/auto` | no list: every scored text model under a hard $1.00/M output bid, re-read every 5 minutes and re-ordered by measured value |
 | `infered/auto-budget` | no list: every scored text model under a hard $0.50/M output bid, re-read every 5 minutes and re-ordered by measured value |
 
-The two `auto` products are **market chains**, not cascades: each is served from a D1 snapshot of live asks (`infered/auto` hourly, `infered/auto-budget` every five minutes), every upstream attempt carries the chain's output bid, and `GET /v1/auto` / `GET /v1/auto-budget` show the served order. Details: `docs/auto-chain.md`.
+The two `auto` products are **market chains**, not cascades: both discover their members from the live feed (the only difference is the output bid, $1.00 vs $0.50), each is served from a D1 snapshot of live asks refreshed every five minutes, every upstream attempt carries the chain's output bid, and `GET /v1/auto` / `GET /v1/auto-budget` show the served order. Details: `docs/auto-chain.md`.
 
 - Unknown/unregistered model names and requests without a model fall to `infered/glm-budget`.
 - Budget ladder: $0.50 tier-0 ceiling (spot asks only), then an unconstrained last-resort tier that admits official list prices (counted as `officialLastResortServes` on `/v1/metrics`).

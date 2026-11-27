@@ -1,10 +1,10 @@
 # `infered/auto`
 
-> Two market chains share this document and one mechanism: `infered/auto` (order declared by the owner) and `infered/auto-budget` (order measured — see its section below). The longer sections that follow describe the snapshot, quota and bid machinery both chains run on. **Stale since 2026-11-21:** where they describe `infered/auto`'s eight-model roster, a `priority` sort, or the exclusion of thin books, they describe the chain as it was before it was declared (commit `def6658`). Its members and order are the three in the table below.
+> Two market chains share this document and one mechanism: `infered/auto` ($1.00/M output bid) and `infered/auto-budget` ($0.50/M output bid). Since 2026-11-27 **both discover their members** (owner directive, 16:42 EAT: "do the same for the auto model"): membership is whatever the live feed quotes inside the bid that carries an intelligence score, re-read every five minutes, and the served order is measured. `infered/auto` was owner-declared (`cx/gpt-6.2-sol` → `ali/qwen4-max` → `zai/glm-5.4`) from 2026-11-21 to 2026-11-27; before that it ranked a scored pool (commit `def6658`). The longer sections below that describe that eight-model roster, a `priority` sort, hourly refresh, or the exclusion of thin books describe the chain as it was — the mechanism notes they sit in (staleness, quota health, the bid on every attempt, cache-aware pricing) still hold exactly.
 
 The `infered/` prefix is a namespace, not part of the product: a request naming `auto` resolves to this same chain. Every alias that omits the prefix (`auto`, `glm-budget`, `astra-budget`, `solterra`, …) is canonicalised to its `infered/` form before routing, so a client cannot silently land on the default cascade by leaving the prefix off. Raw model ids and unknown names keep their existing path — an unknown name still resolves to the default `infered/glm-budget` chain.
 
-`infered/auto` selects from the eight models in its roster (`src/router/auto.js`). Its fixed intelligence scores are an Artificial Analysis benchmark snapshot, not live or task-specific quality scores. The roster grew from the 10 November 2026 comparison: `grok/grok-4.7` (score 35.5, 9 in-cap sellers at $0.006/M out) remains in the roster; the retired Sonnet entry is no longer probed or ranked. The same day `ag/gemini-4-carbon` (score 60.0, the market's top score, $0.01–$0.50/M out asks) joined under the seller-quota rule below: its thin book saturates hard, and measured quota health demotes it below available members until supply recovers. `ag/gemini-4-argon` is market-eligible but **excluded by owner directive (2026-11-11)**; a test pin keeps it out of the roster.
+`infered/auto` has no member list. A request naming it buys the best measured value the market offers under $1.00/M output: every text model the feed quotes inside the bid that carries an intelligence score is a candidate, re-read every five minutes, ranked by the value score below. At 16:47 EAT on 2026-11-27 the live door served 75 candidates. Two facts worth knowing from the same read: `zai/glm-5.4` — the one declared member that was actually answering — is **not** a candidate, because no board or recorded score exists for it and no score is invented; it stays directly requestable raw and is still the head of the `infered/glm-budget` cascade. And `cx/gpt-6.2-sol` returns as an ordinary candidate whenever its asks sit under the bid, while `ali/qwen4-max`'s asks were over the bid at that moment. `ag/gemini-4-argon` remains excluded by owner directive (2026-11-11); a test pin keeps it out of every market chain.
 
 ## `infered/auto-budget` (2026-11-27)
 
@@ -12,10 +12,10 @@ The second market chain, built for "the highest intelligence per dollar under $0
 
 | | `infered/auto` | `infered/auto-budget` |
 |---|---|---|
-| Members | owner-declared: `cx/gpt-6.2-sol` → `ali/qwen4-max` → `zai/glm-5.4` | discovered: every text model quoted inside the bid that has an intelligence score |
-| Order | declared: measured health annotates and never reorders | measured: re-sorted at serve time |
+| Members | discovered: every text model quoted inside the bid that has an intelligence score | discovered: the same rule |
+| Order | measured: re-sorted at serve time | measured: re-sorted at serve time |
 | Output bid | $1.00/M | $0.50/M, hard for every member (no ceiling exemption) |
-| Refresh | hourly | every 5 minutes |
+| Refresh | every 5 minutes | every 5 minutes |
 | D1 rows | `auto`, `auto-quota` | `auto-budget`, `auto-budget-quota` |
 | Inspect | `GET /v1/auto` | `GET /v1/auto-budget` |
 
@@ -23,7 +23,7 @@ The second market chain, built for "the highest intelligence per dollar under $0
 
 **Where the scores come from.** `src/router/intelligence.js` reads the public Artificial Analysis board (models.fru.dev, no key) at most twice a day into its own D1 row, `auto-intelligence`, and serves the last board it read when the site is down. A feed id and a board entry join by exact match on a normalised family key, so two sellers of one model share one score. Behind the board are the eight scores this repo recorded on 2026-11-10/11. A model on neither list has no score.
 
-**The order** is `valueScore = intelligence × reliability × speed ÷ effectiveBlended`, sorted in the value tiers of `src/router/health.js`: members that have answered come first; a member that is cooling or disproven goes last. With no attempt history it is pure intelligence per dollar, which can put the least intelligent member first when it is cheap enough — that is the point of the chain. `diagnostics.orderSource` reads `measured-value` (`owner-declared` for `infered/auto`). A declared chain's inspect payload states `declared`; a discovered chain states `parameters` instead, because it has no list to declare.
+**The order** is `valueScore = intelligence × reliability × speed ÷ effectiveBlended`, sorted in the value tiers of `src/router/health.js`: members that have answered come first; a member that is cooling or disproven goes last. With no attempt history it is pure intelligence per dollar, which can put the least intelligent member first when it is cheap enough — that is the point of the chain. `diagnostics.orderSource` reads `measured-value` for both chains. A discovered chain's inspect payload states `parameters`; neither chain states `declared`, because neither has a list to declare.
 
 **The ceiling** is the owner's. A request can tighten it with `X-Infered-Max-Price` and can never loosen it; an ask exactly at $0.50 is inside it. The chain has no fallback to another chain, on purpose: a declared fallback could serve above the ceiling. When nothing inside the bid is buyable, the request fails with `400` instead.
 

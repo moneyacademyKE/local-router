@@ -8,15 +8,23 @@
     (if (zero? exit) (json/parse-string out true)
         (throw (ex-info (str "Node eval error: " err) {:out out})))))
 
+(def ^:private board-json
+  "const boardJson = JSON.stringify({board: {publishedOn: '2026-11-27'}, ranking: [
+     {model: 'cx/gpt-6.2-sol', score: 55}, {model: 'ali/qwen4-max', score: 52},
+     {model: 'zai/glm-5.4', score: 50}]});")
+
 (deftest worker-auto-keeps-the-bid-on-every-fallback
   (let [res (run-node-eval
-             "import worker from './src/worker.js';
-              let row = null, feedCalls = 0; const sent = [], promises = [];
+             (str board-json "
+              import worker from './src/worker.js';
+              let row = null, feedCalls = 0, boardCalls = 0; const sent = [], promises = [];
               const db={prepare(sql) {return {bind(...args) {return {
-                async first() {return sql.includes('auto_chain_snapshot') ? row : null;},
-                async run() {if (sql.includes('INSERT INTO auto_chain_snapshot')) row={hour:args[0],payload:args[1]};}
+                async first() {return sql.includes('auto-intelligence') ? null : row;},
+                async run() {if (sql.includes('auto-intelligence')) return;
+                  if (sql.includes('INSERT INTO auto_chain_snapshot')) row={hour:args[0],payload:args[1]};}
               };}};}};
               globalThis.fetch=async (url, opts) => {
+                if (url.includes('models.fru.dev')) {boardCalls++; return new Response(boardJson, {status:200});}
                 if (url.endsWith('/models')) {feedCalls++; return new Response(JSON.stringify({data:[
                   {id:'cx/gpt-6.2-sol',supports_cache:true,pricing:{asks_in:[0.1],asks_out:[0.5, 0.55]}},
                   {id:'ali/qwen4-max',pricing:{asks_in:[0.01],asks_out:[0.03, 0.04]}}
@@ -36,10 +44,11 @@
               const response=await worker.fetch(request(),env,ctx); const body=await response.text();
               const inspect=await worker.fetch(new Request('https://worker.test/v1/auto'),env,ctx);
               const snapshot=await inspect.json(); await Promise.all(promises);
-              console.log(JSON.stringify({status:response.status,body,sent,feedCalls,inspectStatus:inspect.status,
+              console.log(JSON.stringify({status:response.status,body,sent,feedCalls,boardCalls,inspectStatus:inspect.status,
+                declared:snapshot.declared, parameters:snapshot.parameters,
                 snapshot:snapshot.models.map(m=>({id:m.modelId,askCount:m.askCount,
                   inCapDepth:m.inCapDepth,depthPrice:m.depthPrice,
-                  supportsCache:m.supportsCache,effectiveInput:m.effectiveInput}))}));")]
+                  supportsCache:m.supportsCache,effectiveInput:m.effectiveInput}))}));"))]
     (is (= 200 (:status res)))
     (is (.contains (:body res) "safe fallback"))
     (is (= ["cx/gpt-6.2-sol" "ali/qwen4-max"] (mapv :model (:sent res)))
@@ -47,7 +56,13 @@
     (is (every? #(= "1" (:bid %)) (:sent res)))
     (is (every? #(nil? (:provider %)) (:sent res)) "synthetic node ids are not sent as real upstream sellers")
     (is (= 1 (:feedCalls res)) "the endpoint reads the shared snapshot")
+    (is (= 1 (:boardCalls res))
+        "the refresh reads the live intelligence board once; the served snapshot does not re-read it")
     (is (= 200 (:inspectStatus res)))
+    (is (nil? (:declared res))
+        "infered/auto states parameters, not a member list (owner directive 2026-11-27)")
+    (is (= {:maxOutputPrice 1 :order "measured-value" :refreshMs 300000 :exclude ["gemini4argon"]}
+           (:parameters res)))
     (is (= [{:id "cx/gpt-6.2-sol" :askCount 2 :inCapDepth 2 :depthPrice 0.55}
             {:id "ali/qwen4-max" :askCount 2 :inCapDepth 2 :depthPrice 0.04}]
            (mapv #(select-keys % [:id :askCount :inCapDepth :depthPrice]) (:snapshot res)))
@@ -74,8 +89,9 @@
                 models: [{modelId:'cx/gpt-6.2-sol',score:34,prompt:0.01,completion:0.03}], excluded: []});
               let row = {hour: 1, payload: oldPayload};
               const db={prepare(sql) {return {bind(...args) {return {
-                async first() {return sql.includes('auto_chain_snapshot') ? row : null;},
-                async run() {if (sql.includes('INSERT INTO auto_chain_snapshot')) row={hour:args[0],payload:args[1]};}
+                async first() {return sql.includes('auto-intelligence') ? null : row;},
+                async run() {if (sql.includes('auto-intelligence')) return;
+                  if (sql.includes('INSERT INTO auto_chain_snapshot')) row={hour:args[0],payload:args[1]};}
               };}};}};
               const sent = [];
               globalThis.fetch=async (url, opts) => {
@@ -96,9 +112,10 @@
               console.log(JSON.stringify({status:response.status,body,sent,
                 snapshot:snapshot.models.map(m=>m.modelId),stale:snapshot.stale}));")]
     (is (= 200 (:status res))
-        "a feed outage at an hour boundary must not 503 the whole chain")
+        "a feed outage at a period boundary must not 503 the whole chain")
     (is (.contains (:body res) "stale but safe"))
-    (is (= ["cx/gpt-6.2-sol"] (mapv :model (:sent res))))
+    (is (= ["cx/gpt-6.2-sol"] (mapv :model (:sent res)))
+        "a stale row still names a member the chain can score — the score on the row is the member's ticket")
     (is (every? #(= "1" (:bid %)) (:sent res))
         "stale serving never relaxes the output bid")
     (is (true? (:stale res)) "/v1/auto labels the fallback snapshot as stale")
@@ -106,16 +123,19 @@
 
 (deftest worker-auto-applies-quota-health-to-the-served-chain
   (let [res (run-node-eval
-             "import worker from './src/worker.js';
+             (str board-json "
+              import worker from './src/worker.js';
               import { buildAutoSnapshot } from './src/router/auto.js';
-              const hour = Math.floor(Date.now() / 3600000);
+              import { intelligenceFromBoard } from './src/router/intelligence.js';
+              import { MARKET_CHAINS } from './src/router/chains.js';
+              const period = Math.floor(Date.now() / 300000);
               const market = buildAutoSnapshot({data: [
                 {id: 'cx/gpt-6.2-sol', supports_cache: true, pricing: {asks_in: [0.1], asks_out: [0.19, 0.21]}},
                 {id: 'ali/qwen4-max', pricing: {asks_in: [0.06], asks_out: [0.27, 0.3]}},
                 {id: 'zai/glm-5.4', pricing: {asks_in: [0.002], asks_out: [0.88, 0.9]}}
-              ]}, Date.now());
-              const marketRow = {hour, payload: JSON.stringify(market)};
-              const quotaRow = {hour, payload: JSON.stringify({hour, probedAt: Date.now(), results: {
+              ]}, Date.now(), MARKET_CHAINS['infered/auto'], intelligenceFromBoard(JSON.parse(boardJson)));
+              const marketRow = {hour: period, payload: JSON.stringify(market)};
+              const quotaRow = {hour: period, payload: JSON.stringify({hour: period, probedAt: Date.now(), results: {
                 'cx/gpt-6.2-sol': {status: 'quota', sellersTotal: 2221, sellersOut: 2215, ms: 412},
                 'ali/qwen4-max': {status: 'ok', ms: 890}
               }})};
@@ -145,7 +165,7 @@
                 order:snapshot.models.map(m=>m.modelId),
                 headSaturated:head && head.saturated,
                 headQuota:head && head.quota,
-                stale:snapshot.stale}));")]
+                stale:snapshot.stale}));"))]
     (is (= 200 (:status res)))
     (is (.contains (:body res) "quota-aware serve"))
     (is (= ["ali/qwen4-max"] (mapv :model (:sent res)))
