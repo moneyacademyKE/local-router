@@ -58,9 +58,9 @@ Routing is data-driven from `src/router/catalog.js` — chains are plain arrays;
 | `infered/kimi-glm` | `ali/kimi-k3.1-pro` |
 | `infered/solterra` | `oai/gpt-6.1-sol` → `oai/gpt-6.1-terra` |
 | `infered/auto` | owner-declared, $1.00/M output bid: `cx/gpt-6.2-sol` → `ali/qwen4-max` → `zai/glm-5.4` |
-| `infered/auto-budget` | a scored pool under a hard $0.50/M output bid, re-ordered by measured value at serve time |
+| `infered/auto-budget` | no list: every scored text model under a hard $0.50/M output bid, re-read every 5 minutes and re-ordered by measured value |
 
-The two `auto` products are **market chains**, not cascades: each is served from an hourly D1 snapshot of live asks, every upstream attempt carries the chain's output bid, and `GET /v1/auto` / `GET /v1/auto-budget` show the served order. Details: `docs/auto-chain.md`.
+The two `auto` products are **market chains**, not cascades: each is served from a D1 snapshot of live asks (`infered/auto` hourly, `infered/auto-budget` every five minutes), every upstream attempt carries the chain's output bid, and `GET /v1/auto` / `GET /v1/auto-budget` show the served order. Details: `docs/auto-chain.md`.
 
 - Unknown/unregistered model names and requests without a model fall to `infered/glm-budget`.
 - Budget ladder: $0.50 tier-0 ceiling (spot asks only), then an unconstrained last-resort tier that admits official list prices (counted as `officialLastResortServes` on `/v1/metrics`).
@@ -127,8 +127,9 @@ local D1, no Cloudflare dependency for the primary door.
   Fires at minutes **2 and 32** of every hour — a 30-minute heartbeat for
   measured seller-quota health (owner directive 2026-11-11; since 2026-11-25
   one fire covers every market chain, `infered/auto` then `infered/auto-budget`,
-  each probe under its own chain's bid); the market snapshot
-  itself stays hourly (a two-entry `StartCalendarInterval` array + `RunAtLoad`;
+  each probe under its own chain's bid, the budget chain's first twelve only);
+  `infered/auto`'s snapshot stays hourly and `infered/auto-budget`'s is re-read
+  every five minutes (a two-entry `StartCalendarInterval` array + `RunAtLoad`;
   `StartInterval` never fired under bootstrap and was retired 2026-11-11).
   Log: `~/.opencrabs/state/infered-local/auto-refresh.log` (clean since
   2026-11-12: the scheduled handler hands the probe battery to `ctx.waitUntil`

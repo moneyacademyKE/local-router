@@ -11,7 +11,7 @@
 #   2. deploy                  (pinned wrangler; bunx does not honour a pin)
 #   3. wait for that version   (the previous one must not answer the next step)
 #   4. bust the snapshot rows  (the hourly cache short-circuits otherwise)
-#   5. read every chain back   (require the chain this build declares)
+#   5. read every chain back   (require what this build fixes for each chain)
 #
 # Credentials come from the environment and are never printed:
 #   CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_KEY (or CLOUDFLARE_API_TOKEN)
@@ -44,11 +44,13 @@ wrangler() { bunx wrangler@4.163.0 "$@" --config "$CONFIG"; }
 # listed here. A chain added to src/router/chains.js brings its own D1 rows
 # (infered/auto-budget arrived 2026-11-25 with two), and must not need a second
 # edit in this script to have them busted and its order read back.
-src_js="import { MARKET_CHAINS } from './src/router/chains.js'; import { VIRTUAL_ALIASES } from './src/router/catalog.js';"
+src_js="import { MARKET_CHAINS, chainParameters } from './src/router/chains.js'; import { VIRTUAL_ALIASES } from './src/router/catalog.js';"
 CHAINS="$(node --input-type=module -e "${src_js} console.log(Object.keys(MARKET_CHAINS).map(k => k.replace('infered/', '')).join(' '))")"
 ROWS="$(node --input-type=module -e "${src_js} const ids = ['auto-health', ...Object.values(MARKET_CHAINS).flatMap(c => [c.rowId, c.quotaRowId])]; console.log(ids.map(id => \"'\" + id + \"'\").join(', '))")"
 PRODUCTS="$(node --input-type=module -e "${src_js} console.log(Object.keys(VIRTUAL_ALIASES).sort().join(' '))")"
-declared_by() { node --input-type=module -e "${src_js} console.log(JSON.stringify(MARKET_CHAINS['infered/$1'].members.map(m => m.id)))"; }
+# What a chain fixes, read from the code: a declared chain its member list, a
+# discovered one its parameters (its candidates come from the live market).
+fixed_by() { node --input-type=module -e "${src_js} const c = MARKET_CHAINS['infered/$1']; console.log(JSON.stringify({declared: c.members ? c.members.map(m => m.id) : null, parameters: chainParameters(c)}))"; }
 
 echo "== 1/5  remote D1 migrations (${DB_NAME}) =="
 wrangler d1 migrations apply "$DB_NAME" --remote
@@ -78,22 +80,22 @@ wrangler d1 execute "$DB_NAME" --remote --command \
 
 echo "== 5/5  read every market chain back from ${BASE_URL} =="
 for chain in ${CHAINS}; do
-  want="$(declared_by "${chain}")"
+  want="$(fixed_by "${chain}")"
   # The first request after the bust rebuilds the row; a 503 or an older
-  # isolate answers without the chain, so give it a few tries.
+  # isolate answers without what the chain fixes, so give it a few tries.
   for attempt in $(seq 1 10); do
     body="$(curl -s -m 30 "${BASE_URL}/v1/${chain}")"
-    got="$(printf '%s' "${body}" | jq -c '.declared' 2>/dev/null || true)"
+    got="$(printf '%s' "${body}" | jq -c '{declared, parameters}' 2>/dev/null || true)"
     [ "${got}" = "${want}" ] && break
     sleep 3
   done
   [ "${got}" = "${want}" ] || {
-    echo "deploy check failed: /v1/${chain} does not serve the chain this build declares (${want})" >&2
+    echo "deploy check failed: /v1/${chain} does not serve the chain this build fixes (${want})" >&2
     exit 1
   }
   echo "-- /v1/${chain}"
   printf '%s' "${body}" | jq -c \
-    '{declared, served: [.models[].modelId], excluded: [.excluded[] | (.modelId + ":" + .reason)], bid: .diagnostics.bid, orderSource: .diagnostics.orderSource}'
+    '{declared, parameters, served: [.models[].modelId], unscored: .diagnostics.unscored.count, excluded: [.excluded[] | (.modelId + ":" + .reason)], bid: .diagnostics.bid, orderSource: .diagnostics.orderSource}'
 done
 echo
 

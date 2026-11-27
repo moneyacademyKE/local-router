@@ -8,6 +8,7 @@ import { resolveVirtualModel, getModelMetadata, CASCADE_CHAINS, CEILING_EXEMPT_M
 import { getQuotesForModel, calculateSavingsPct } from "./pricing.js";
 import { getProviderStats, isCircuitOpen } from "./metrics.js";
 import { MARKET_CHAINS } from "./chains.js";
+import { isChainMember } from "./auto.js";
 
 export const DEFAULT_WEIGHTS = {
   price: 0.5,
@@ -224,16 +225,17 @@ export function rankCandidates({
   startAtModel = null,
   autoSnapshot = null
 }) {
-  // A market chain (infered/auto, infered/auto-budget): the hourly snapshot IS
-  // the candidate list, in the chain's own order, under the chain's own bid.
-  // A request may tighten the bid, never loosen it.
+  // A market chain (infered/auto, infered/auto-budget): the snapshot IS the
+  // candidate list, in the chain's own order, under the chain's own bid.
+  // A request may tighten the bid, never loosen it. Which snapshot models the
+  // chain admits is the chain's own rule (isChainMember): a declared chain
+  // names them, a discovered one admits every model it can score.
   const marketChain = MARKET_CHAINS[model];
   if (marketChain) {
     const bid = maxFallbackPrice === null ? marketChain.bid : Math.min(marketChain.bid, maxFallbackPrice);
     if (!Number.isFinite(bid) || bid < 0) return [];
-    const memberIds = new Set(marketChain.members.map(m => m.id));
     return (autoSnapshot?.models || []).filter(m =>
-      memberIds.has(m?.modelId) &&
+      isChainMember(marketChain, m) &&
       Number.isFinite(m.completion) && m.completion >= 0 && m.completion <= bid
     ).map((m, i) => {
       const providerId = "inferhub-auto";

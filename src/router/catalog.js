@@ -3,7 +3,7 @@
  * Pure data structures and resolution logic for Infered router.
  */
 
-import { AUTO_CHAIN, AUTO_BUDGET_POOL, TABLE } from "./chains.js";
+import { AUTO_CHAIN, TABLE } from "./chains.js";
 
 // Model capabilities and quality benchmarks (normalized 0.0 - 1.0).
 // Slimmed 2026-09-05 (owner directive): chain members plus owner-designated
@@ -130,9 +130,10 @@ export const CASCADE_CHAINS = TABLE({
   // Declared membership in declared order (owner directive 2026-11-21); the
   // hourly market snapshot supplies each member's live asks.
   "infered/auto": [...AUTO_CHAIN],
-  // Membership only (owner directive 2026-11-25). This list is NOT the try
-  // order: the chain re-sorts itself by measured value at serve time.
-  "infered/auto-budget": AUTO_BUDGET_POOL.map(m => m.id)
+  // A discovered chain (owner directive 2026-11-25): no list. The entry
+  // exists so the NAME resolves to this product; its candidates are whatever
+  // the live market offers inside its parameters, read from its snapshot.
+  "infered/auto-budget": []
 });
 
 // Default requested model — also where UNRECOGNIZED names land (typos like

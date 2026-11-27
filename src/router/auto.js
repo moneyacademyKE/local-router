@@ -9,13 +9,18 @@
  * thinBook (2026-11-18) — depth orders the chain, it does not ban supply. */
 
 import { loadHealth, applyValueRanking } from "./health.js";
-import { AUTO_MODEL, MARKET_CHAINS } from "./chains.js";
+import { AUTO_MODEL, MARKET_CHAINS, chainParameters } from "./chains.js";
+import { familyKeys, intelligenceFor, intelligenceProvenance, loadIntelligence } from "./intelligence.js";
 
 export const AUTO_HOUR_MS = 60 * 60 * 1000;
 // Heartbeat cadence (owner directive 2026-11-11): measured availability and
 // the scheduled refresh run every 30 minutes, without changing hourly D1 keys.
 export const AUTO_HEARTBEAT_MS = 30 * 60 * 1000;
 export const AUTO_MAX_HEARTBEAT_MS = 35 * 60 * 1000;
+// One probe is one upstream subrequest, and a scheduled invocation dies at 50
+// of them. A discovered chain can hold far more members than that, so the
+// battery measures the head it will actually try, not the whole book.
+export const QUOTA_PROBE_CAP = 12;
 
 // Cache economics (owner rule 2026-11-11; measured live on the marketplace:
 // a repeated long prefix cached nearly all input at 0.10x the fresh ask).
@@ -28,13 +33,38 @@ export const AUTO_MAX_HEARTBEAT_MS = 35 * 60 * 1000;
 export const CACHE_HIT_RATE = 0.5;
 export const CACHE_TOKEN_COST = 0.1;
 
-/** Drops everything a persisted row names that the chain no longer does: a
+/** How long one snapshot of a chain is served before the live feed is read
+ * again. An hour for a declared chain (owner rule 2026-11-11); a chain that
+ * discovers its members names its own shorter period, because its membership
+ * follows the market. The D1 `hour` column holds this period's index for
+ * every chain row, which is what keeps an older snapshot from overwriting a
+ * newer one. */
+function snapshotPeriodMs(chain) {
+  return chain.ttlMs || AUTO_HOUR_MS;
+}
+
+function periodOf(chain, now) {
+  return Math.floor(now / snapshotPeriodMs(chain));
+}
+
+/** Whether one snapshot model may serve in this chain. A declared chain
+ * names its members. A discovered chain admits exactly what its parameters
+ * admit: a model that carries a known intelligence score and whose family the
+ * owner has not excluded. One predicate for every place that asks — the
+ * build, the rank, and the serve of a persisted row, which must not be able to
+ * smuggle in a model the parameters no longer admit. */
+export function isChainMember(chain, model) {
+  if (!chain.discover) return chain.members.some(m => m.id === model?.modelId);
+  if (!Number.isFinite(model?.score)) return false;
+  return !familyKeys(model.modelId).some(key => chain.exclude.includes(key));
+}
+
+/** Drops everything a persisted row names that the chain no longer admits: a
  * snapshot written before a chain change serves only current members. */
 export function filterAutoSnapshotModels(snapshot, chain = MARKET_CHAINS[AUTO_MODEL]) {
   if (!snapshot || typeof snapshot !== "object") return { models: [] };
-  const memberIds = new Set(chain.members.map(m => m.id));
   const models = Array.isArray(snapshot.models)
-    ? snapshot.models.filter(model => memberIds.has(model?.modelId))
+    ? snapshot.models.filter(model => isChainMember(chain, model))
     : [];
   return { ...snapshot, models };
 }
@@ -56,17 +86,52 @@ function askLadder(pricing) {
     .map(Number).filter(v => Number.isFinite(v) && v >= 0).sort((a, b) => a - b);
 }
 
-export function buildAutoSnapshot(feed, now = Date.now(), chain = MARKET_CHAINS[AUTO_MODEL]) {
+/** The models a chain may serve, as the chain itself defines them, plus the
+ * feed ids it could not score. A declared chain names its members. A
+ * discovered chain takes every text-output model the feed quotes that carries
+ * an intelligence score; the price gate is then the same code for both, so an
+ * unscored model is never a candidate and an over-cap one is still named. */
+function chainCandidates(chain, entries, board) {
+  if (!chain.discover) return { candidates: chain.members, unscored: new Set() };
+  const candidates = [];
+  const unscored = new Set();
+  for (const entry of entries) {
+    // The feed also lists canonical ids with no book of their own. Nothing
+    // can be bought from an entry without pricing, and a model whose output
+    // is an image cannot answer a chat completion.
+    if (!entry?.id || !entry.pricing) continue;
+    if (entry.output_modality && entry.output_modality !== "text") continue;
+    const found = intelligenceFor(entry.id, { board });
+    // An owner exclusion is final: neither a candidate nor a gap in the record.
+    if (found && !isChainMember(chain, { modelId: entry.id, score: found.score })) continue;
+    candidates.push(found
+      ? { id: entry.id, score: found.score, scoreSource: found.source }
+      : { id: entry.id });
+    if (!found) unscored.add(entry.id);
+  }
+  return { candidates, unscored };
+}
+
+export function buildAutoSnapshot(feed, now = Date.now(), chain = MARKET_CHAINS[AUTO_MODEL], board = null) {
   if (!Array.isArray(feed?.data)) throw new Error("Invalid live market response");
   const entries = new Map(feed.data.map(m => [m.id, m]));
+  const { candidates, unscored } = chainCandidates(chain, feed.data, board);
   const models = [];
   const excluded = [];
-  for (const { id, score } of chain.members) {
+  const unscoredUnderBid = [];
+  for (const { id, score, scoreSource } of candidates) {
     const entry = entries.get(id);
     const pricing = entry?.pricing;
-    if (!pricing) { excluded.push({ modelId: id, reason: "not_in_feed" }); continue; }
-    const prompt = minAsk(pricing.asks_in, pricing.min_ask_in);
+    const prompt = minAsk(pricing?.asks_in, pricing?.min_ask_in);
     const asks = askLadder(pricing);
+    // A model with no intelligence score is not an exclusion: nothing about
+    // its book disqualified it. It is counted, cheapest first, under
+    // `unscored`, because the only thing keeping it out is a missing number.
+    if (unscored.has(id)) {
+      if (asks.length && asks[0] <= chain.bid) unscoredUnderBid.push({ modelId: id, ask: asks[0] });
+      continue;
+    }
+    if (!pricing) { excluded.push({ modelId: id, reason: "not_in_feed" }); continue; }
     if (prompt === null || !asks.length) { excluded.push({ modelId: id, reason: "unpriced" }); continue; }
     // In-cap sellers = providers offering output inside the bid: the low price
     // tier this chain can actually buy from. Depth there is the stability weight.
@@ -91,7 +156,8 @@ export function buildAutoSnapshot(feed, now = Date.now(), chain = MARKET_CHAINS[
       : prompt;
     const depthPrice = inCap[inCap.length - 1];
     const effectiveBlended = Number(((0.25 * effectiveInput) + (0.75 * depthPrice)).toFixed(6));
-    models.push({ modelId: id, ...(Number.isFinite(score) ? { score } : {}), prompt, completion: asks[0],
+    models.push({ modelId: id, ...(Number.isFinite(score) ? { score } : {}),
+      ...(scoreSource ? { scoreSource } : {}), prompt, completion: asks[0],
       askCount: asks.length, inCapDepth: inCap.length, depthPrice, thinBook,
       supportsCache, effectiveInput, effectiveBlended });
   }
@@ -106,11 +172,18 @@ export function buildAutoSnapshot(feed, now = Date.now(), chain = MARKET_CHAINS[
       b.inCapDepth - a.inCapDepth || a.effectiveBlended - b.effectiveBlended ||
       a.modelId.localeCompare(b.modelId));
   }
-  const hour = Math.floor(now / AUTO_HOUR_MS);
-  return { hour, refreshedAt: now, nextRefreshAt: (hour + 1) * AUTO_HOUR_MS, model: chain.model, bid: chain.bid,
+  const periodMs = snapshotPeriodMs(chain);
+  const period = Math.floor(now / periodMs);
+  unscoredUnderBid.sort((a, b) => a.ask - b.ask || a.modelId.localeCompare(b.modelId));
+  return { hour: Math.floor(now / AUTO_HOUR_MS), refreshedAt: now, periodMs,
+    nextRefreshAt: (period + 1) * periodMs, model: chain.model, bid: chain.bid,
     cache: { hitRate: CACHE_HIT_RATE, tokenCost: CACHE_TOKEN_COST,
       measured: "2026-11-11 live double-probe: 5265/5276 prefix tokens cached, cache-read billed at 0.10x fresh input ask" },
-    models, excluded };
+    models, excluded,
+    // Quoted inside the bid but with no published intelligence score: the
+    // chain cannot rank them, so it says who they are instead of losing them.
+    ...(chain.discover ? { intelligence: intelligenceProvenance(board),
+      unscored: unscoredUnderBid.map(u => u.modelId) } : {}) };
 }
 
 /** Seller-quota health (owner rule 2026-11-11): the feed publishes no quota
@@ -159,7 +232,8 @@ function classifyQuotaProbe(status, message) {
 export async function probeQuotaHealth(env, members, fetchFn = fetch, now = Date.now(), chain = MARKET_CHAINS[AUTO_MODEL]) {
   const baseUrl = env?.INFERHUB_BASE_URL || "https://api.inferhub.dev/v1";
   const results = {};
-  for (const member of members) {
+  const probed = members.slice(0, QUOTA_PROBE_CAP);
+  for (const member of probed) {
     const started = Date.now();
     let outcome = { status: "unknown" };
     try {
@@ -213,9 +287,9 @@ async function readSnapshot(db, rowId) {
   return db.prepare(`SELECT hour, payload FROM auto_chain_snapshot WHERE id = '${rowId}'`).bind().first();
 }
 
-function withStaleness(row, currentHour, chain) {
+function withStaleness(row, currentPeriod, chain) {
   const snapshot = filterAutoSnapshotModels(JSON.parse(row.payload), chain);
-  return { ...snapshot, stale: Number(row.hour) < currentHour };
+  return { ...snapshot, stale: Number(row.hour) < currentPeriod };
 }
 
 /** Applies measured quota health to a served snapshot. Quota data older than
@@ -286,12 +360,22 @@ export function chainDiagnostics(snapshot, chain = MARKET_CHAINS[AUTO_MODEL]) {
   if (cooling.length) warnings.push(`cooling after a recent failure: ${cooling.join(", ")}`);
   if (thin.length) warnings.push(`thin book, one in-cap seller: ${thin.join(", ")}`);
   // A member that the gates dropped is the owner's business, not a silent
-  // omission: name it, and name why, in the same sentence.
+  // omission: name it, and name why, in the same sentence. (A declared chain
+  // only: a discovered chain has no list for a model to be absent from.)
   const servedIds = new Set(models.map(m => m.modelId));
-  const missing = chain.members.map(m => m.id).filter(id => !servedIds.has(id));
+  const missing = (chain.members || []).map(m => m.id).filter(id => !servedIds.has(id));
   if (missing.length) {
     warnings.push(`${chain.noun} absent from the served chain: ${missing.join(", ")}` +
       (gates ? ` (${gates})` : ""));
+  }
+  // A discovered chain also says what it could not rank: models quoted inside
+  // the bid with no published intelligence score. That is a gap in the
+  // record, not a fault of the market, and the cheapest are named so a score
+  // can be recorded deliberately rather than guessed.
+  const unscored = Array.isArray(snapshot?.unscored) ? snapshot.unscored : [];
+  if (unscored.length) {
+    warnings.push(`${unscored.length} models under the bid have no intelligence score and cannot be ranked: ` +
+      `${unscored.slice(0, 5).join(", ")}${unscored.length > 5 ? ", ..." : ""}`);
   }
   if (unlock) warnings.push(`raise the output bid to ${unlock.ask} to admit ${unlock.modelId}`);
   const head = models[0] || null;
@@ -300,6 +384,7 @@ export function chainDiagnostics(snapshot, chain = MARKET_CHAINS[AUTO_MODEL]) {
     // says the order was measured. Said explicitly so a report never has to
     // infer whether an order was bought, declared, or found.
     orderSource: chain.orderSource,
+    unscored: { count: unscored.length, cheapest: unscored.slice(0, 5) },
     head: head ? { modelId: head.modelId, valueTier: head.valueTier,
       valueScore: head.valueScore, measuredAttempts: head.measuredAttempts } : null,
     unlock, warnings };
@@ -323,16 +408,20 @@ export async function getAutoSnapshot(env, fetchFn = fetch, now = Date.now(), ch
   const db = env?.ROUTING_DB;
   if (!db || !env?.INFERHUB_API_KEY) throw new Error("Auto chain needs D1 and a live market key");
   const hour = Math.floor(now / AUTO_HOUR_MS);
+  // A snapshot is fresh for its chain's own period: the hour, or less for a
+  // chain that discovers its members.
+  const period = periodOf(chain, now);
   const serve = async (row) => {
     const snapshot = await withQuotaHealth(
-      await withValueOrder(withStaleness(row, hour, chain), db, now, chain), db, hour, chain.quotaRowId);
-    // `declared` is the chain as written in ./chains.js, said by the live table
-    // rather than the stored row, so a reader can set the two orders side by
-    // side: what was declared, and what is being served.
-    return { ...snapshot, declared: chain.members.map(m => m.id), diagnostics: chainDiagnostics(snapshot, chain) };
+      await withValueOrder(withStaleness(row, period, chain), db, now, chain), db, hour, chain.quotaRowId);
+    // What the chain fixes, said by the live table rather than the stored row,
+    // so a reader can set it beside the order being served: a declared chain
+    // states its members, a discovered one its parameters.
+    return { ...snapshot, declared: chain.members ? chain.members.map(m => m.id) : null,
+      parameters: chainParameters(chain), diagnostics: chainDiagnostics(snapshot, chain) };
   };
   let row = await readSnapshot(db, chain.rowId);
-  if (row && Number(row.hour) === hour) return serve(row);
+  if (row && Number(row.hour) === period) return serve(row);
 
   const baseUrl = env.INFERHUB_BASE_URL || "https://api.inferhub.dev/v1";
   try {
@@ -340,12 +429,13 @@ export async function getAutoSnapshot(env, fetchFn = fetch, now = Date.now(), ch
       headers: { Authorization: `Bearer ${env.INFERHUB_API_KEY}` }
     });
     if (!response.ok) throw new Error(`Auto market refresh failed (${response.status})`);
-    const snapshot = buildAutoSnapshot(await response.json(), now, chain);
+    const snapshot = buildAutoSnapshot(await response.json(), now, chain,
+      chain.discover ? await loadIntelligence(env, fetchFn, now) : null);
     await db.prepare(
       `INSERT INTO auto_chain_snapshot (id, hour, payload) VALUES ('${chain.rowId}', ?1, ?2) ` +
       "ON CONFLICT(id) DO UPDATE SET hour=excluded.hour, payload=excluded.payload " +
       "WHERE excluded.hour > auto_chain_snapshot.hour"
-    ).bind(hour, JSON.stringify(snapshot)).run();
+    ).bind(period, JSON.stringify(snapshot)).run();
     row = await readSnapshot(db, chain.rowId);
   } catch (refreshError) {
     if (!row) throw refreshError;

@@ -7,11 +7,14 @@
  *   infered/auto         — membership and sequence DECLARED by the owner
  *                          (2026-11-21). Measured health annotates each member
  *                          and never reorders it.
- *   infered/auto-budget  — a SCORED POOL searched for the highest
- *                          intelligence per dollar (owner directive
- *                          2026-11-25). The served order is measured, not
- *                          declared: valueScore = intelligence x reliability
- *                          x speed / effectiveBlended (see ./health.js). */
+ *   infered/auto-budget  — PARAMETERS, not a list (owner directive
+ *                          2026-11-27): the highest intelligence per dollar
+ *                          the market offers under the output bid. Membership
+ *                          is discovered from the live feed on every snapshot
+ *                          (./auto.js buildAutoSnapshot), and the served order
+ *                          is measured, not declared: valueScore =
+ *                          intelligence x reliability x speed /
+ *                          effectiveBlended (see ./health.js). */
 
 // ---- infered/auto ----------------------------------------------------------
 
@@ -62,23 +65,20 @@ export const AUTO_BUDGET_MODEL = "infered/auto-budget";
 // and the owner named this ceiling explicitly. An ask exactly at $0.50 is
 // inside it — the same on-the-ceiling rule the $1.00 bid follows.
 export const AUTO_BUDGET_OUTPUT_BID = 0.5;
-// Intelligence scores are the Artificial Analysis snapshot from 2026-11-10,
-// not live scores — the recorded values the auto chain ranked by before it
-// became owner-declared on 2026-11-21. A model with no score on record is NOT
-// in the pool: an intelligence-per-dollar search cannot rank intelligence it
-// does not know, and an invented score would be a belief wearing a number.
-// Admitting a model is recording its score here; that is the whole change.
-// Argon stays out (owner directive 2026-11-11).
-export const AUTO_BUDGET_POOL = [
-  { id: "ag/gemini-4-carbon", score: 60 },
-  { id: "cx/gpt-6-astra", score: 57 },
-  { id: "oai/gpt-6.1-sol", score: 55 },
-  { id: "cx/gpt-6.1-terra", score: 51 },
-  { id: "oai/gpt-6.1-terra", score: 51 },
-  { id: "ali/kimi-k3.1-pro", score: 46 },
-  { id: "grok/grok-4.7", score: 35.5 },
-  { id: "ali/glm-5.3", score: 32 }
-];
+// How long one snapshot of this chain is served before the live feed is read
+// again. An hour was right while membership was a list; membership is now
+// whatever the market offers inside the bid (owner directive 2026-11-27: the
+// chain must keep changing to meet its parameters), so it is re-read often.
+// The per-attempt bid still enforces the ceiling between two reads.
+export const AUTO_BUDGET_TTL_MS = 5 * 60 * 1000;
+// Families the owner keeps out of the chain, by family key. Argon stays out
+// (owner directive 2026-11-11).
+export const AUTO_BUDGET_EXCLUDE = ["gemini4argon"];
+// Intelligence scores live in ./intelligence.js: a published index read
+// live, with the scores this repo recorded on 2026-11-10/11 behind it. A model
+// on neither is NOT a candidate — an intelligence-per-dollar search cannot
+// rank intelligence it does not know, and an invented score would be a belief
+// wearing a number. The chain's diagnostics name every such model it finds.
 
 /** A lookup table with no inherited keys. These tables are keyed by names that
  * arrive in a request body, and a plain object literal answers "constructor"
@@ -93,7 +93,8 @@ export const TABLE = (entries) => Object.assign(Object.create(null), entries);
  * seller quota), so one chain's book can never leak into the other's.
  * `order`: "declared" tries the members in the listed sequence (measured health
  * annotates, never reorders); "value" re-sorts them by measured value at serve
- * time. */
+ * time. A chain with `discover` has no `members`: its candidates are whatever
+ * the live feed offers inside its parameters (see `chainParameters`). */
 export const MARKET_CHAINS = TABLE({
   [AUTO_MODEL]: {
     model: AUTO_MODEL, rowId: "auto", quotaRowId: "auto-quota", bid: AUTO_OUTPUT_BID,
@@ -102,7 +103,19 @@ export const MARKET_CHAINS = TABLE({
   },
   [AUTO_BUDGET_MODEL]: {
     model: AUTO_BUDGET_MODEL, rowId: "auto-budget", quotaRowId: "auto-budget-quota",
-    bid: AUTO_BUDGET_OUTPUT_BID, members: AUTO_BUDGET_POOL, order: "value",
-    orderSource: "measured-value", noun: "pool member"
+    bid: AUTO_BUDGET_OUTPUT_BID, order: "value",
+    orderSource: "measured-value", noun: "candidate",
+    // No `members`: the chain's candidates are discovered on every snapshot.
+    discover: true, ttlMs: AUTO_BUDGET_TTL_MS, exclude: AUTO_BUDGET_EXCLUDE
   }
 });
+
+/** What a discovered chain fixes. Membership is deliberately not among these:
+ * it is whatever the live market offers inside them, so the chain changes as
+ * the market does. Stated in the chain's inspect payload, where a declared
+ * chain instead states its member list. */
+export function chainParameters(chain) {
+  if (!chain?.discover) return null;
+  return { maxOutputPrice: chain.bid, order: chain.orderSource,
+    refreshMs: chain.ttlMs, exclude: [...chain.exclude] };
+}
