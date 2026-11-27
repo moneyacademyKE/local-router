@@ -377,3 +377,46 @@
     (is (nil? (:chainFallback res))
         "terminal on purpose — a declared fallback chain could serve above the ceiling")
     (is (true? (:listed res)))))
+
+(deftest a-dead-board-still-builds-the-chain-from-recorded-scores
+  (let [res (run-node-eval
+             "import worker from './src/worker.js';
+              globalThis.fetch = async (url) => {
+                if (String(url).includes('models.fru.dev')) throw new Error('board down');
+                return new Response(JSON.stringify({data: [
+                  {id: 'ag/gemini-4-carbon', pricing: {asks_in: [0.02], asks_out: [0.12]}},
+                  {id: 'grok/grok-4.7', pricing: {asks_in: [0.06], asks_out: [0.44]}},
+                  {id: 'mm/unknown-model', pricing: {asks_in: [0.01], asks_out: [0.10]}}
+                ]}), {status: 200});
+              };
+              const rows = {};
+              const db = {prepare(sql) { return {bind(...args) { return {
+                async first() {
+                  for (const id of Object.keys(rows)) if (sql.includes(`'${id}'`)) return rows[id];
+                  return null;
+                },
+                async all() { return {results: []}; },
+                async run() {
+                  const at = sql.indexOf('VALUES (');
+                  if (at >= 0 && sql[at + 8] === \"'\") {
+                    const id = sql.slice(at + 9, sql.indexOf(\"'\", at + 9));
+                    rows[id] = {hour: args[args.length - 2], payload: args[args.length - 1]};
+                  }
+                },
+                async batch() { return []; }
+              }; }}; }};
+              const env = {ROUTING_DB: db, INFERHUB_API_KEY: 'key-from-test', INFERHUB_BASE_URL: 'https://example.test/v1'};
+              const response = await worker.fetch(new Request('https://worker.test/v1/auto-budget'), env, {waitUntil() {}});
+              const body = await response.json();
+              console.log(JSON.stringify({status: response.status, intelligence: body.intelligence,
+                served: body.models.map(m => [m.modelId, m.score]),
+                unscored: body.diagnostics.unscored.count}));")]
+    (is (= 200 (:status res))
+        "the board is down; the chain still builds")
+    (is (= "recorded" (get-in res [:intelligence :source]))
+        "the payload says where its scores came from")
+    (is (= #{["ag/gemini-4-carbon" 60] ["grok/grok-4.7" 35.5]}
+           (set (:served res)))
+        "the recorded 2026-11-10/11 scores rank the candidates")
+    (is (= 1 (:unscored res))
+        "a model neither source knows stays out and is counted")))
